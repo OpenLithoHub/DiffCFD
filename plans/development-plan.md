@@ -16,11 +16,13 @@
 **Legal basis for the open-source gate (must not be misunderstood):**
 China Patent Law Art. 24 grace period covers ONLY four narrow categories: (1) state-of-emergency first public disclosure for public interest, (2) first display at a government-recognized international exhibition, (3) first publication at a designated academic/technical conference, (4) unauthorized disclosure by a third party without the inventor's consent. **GitHub open-source push falls into NONE of these categories.** A pre-filing GitHub push permanently destroys novelty in China with zero grace period available. There is no rescue path.
 
+**⚠️ Disclaimer**: The legal analysis in this section (Art. 24, Art. 4 secrecy review, Art. 25 hardware binding) represents the author's understanding for planning purposes and is NOT legal advice. All patent strategy decisions must be confirmed with a qualified Chinese patent attorney before filing. In particular: (a) the Art. 25 "hardware binding" framing for algorithm claims should be reviewed by a CNIPA-registered agent; (b) the secrecy review risk assessment is based on general knowledge and must be confirmed for the specific application domain.
+
 **Patent strategy note (revised per legal risk analysis):**
 - CN首申只覆盖v0.1已验证的**C1**（稳态隐式微分+Poiseuille解析梯度验证作为实施例）
 - C2在C1申请提交后单独申请（需要v0.3 cylinder wake基准作为实施例）
 - C3/C4各自单独申请，等对应milestone完成后提交
-- **开源时机**：收到CN受理回执后再push，不是"申请当天"——消除时序风险，成本为零
+- **开源时机**：收到**申请号 + 申请日确认**后push（不是受理通知书——受理通知书是形式审查回执，晚于申请日数天到数周，不是优先权锚点）
 
 **Do NOT push the following until CN filing:**
 - `diffcfd/solvers/navier_stokes.py` — implicit differentiation through SIMPLE (core claim)
@@ -63,21 +65,25 @@ China Patent Law Art. 24 grace period covers ONLY four narrow categories: (1) st
 - No sCO₂ property integration
 - Non-standard tensor abstraction — steep learning curve vs. native PyTorch
 
-**FluidGym fact-check** (new competitor, source code confirmed 2026-05-23, arXiv:2601.15015):
+**FluidGym fact-check** (source code confirmed 2026-05-23, commit 5ec3a8784c3a, arXiv:2601.15015):
 - ✅ PyTorch-native, GPU-accelerated, fully open-source (MIT), actively maintained
 - ✅ Incompressible flow environments: cylinder wake (2D), airfoil, Rayleigh-Bénard convection, turbulent channel flow
 - ✅ `differentiable=True` mode: unrolls PISO time steps through autograd
 - ✅ PPO and SAC baselines provided, pre-trained models on HuggingFace
-- ❌ **Solver: PISOtorch — PISO algorithm, explicitly transient (time-marching)**. NOT SIMPLE, NOT steady-state. `Simulation` class wraps `PISOtorchSimulation`; `corrector_steps` refers to PISO corrector iterations, NOT SIMPLE convergence. There is no fixed-point solve or steady-state convergence check.
-- ❌ **"Gymnasium-like API" ≠ standard `gymnasium.Env`** — FluidGym uses a custom `FluidEnvLike` protocol (duck-typed), not a subclass of `gymnasium.Env`. It does NOT inherit from `gymnasium.Env`; it does NOT pass `gymnasium`'s `check_env()`. SB3 requires `gymnasium.Env` subclassing or explicit wrapping — FluidGym's parallel env and wrappers are custom (`FluidWrappers`, `ParallelFluidEnv`) and not gymnasium-native.
-- ❌ No steady-state implicit differentiation — differentiable mode unrolls all PISO time steps (O(N·T) memory), not fixed-point O(N)
+- ✅ **Has a true `gymnasium.Env` subclass**: `GymFluidEnv(gymnasium.Env)` in `src/fluidgym/integration/gymnasium.py` (line 13: `class GymFluidEnv(Env)` where `Env` is `from gymnasium import Env`). Also `VecFluidEnv(SB3VecEnv)` for SB3. The README claim of "Gymnasium / SB3 integration" is accurate.
+- ❌ **Solver: PISOtorch / PICT — PISO algorithm, explicitly transient**. Docstring line 1: *"FluidGym simulation class based on PISOtorch implemented in PICT."* `PISOtorch` is the real Python class (imported from `fluidgym.simulation.extensions`); PICT (arXiv:2505.16992) is the underlying TU Munich solver project. NOT SIMPLE. No fixed-point solve. C1 is not threatened.
+- ❌ **`GymFluidEnv.step()` calls `.detach().cpu().numpy()` on every output** — severs the autograd graph. `VecFluidEnv` (SB3) does the same. FluidGym has the **identical structural split as HydroGym**: differentiable mode (native `FluidEnv`) vs gymnasium-compatible mode (`GymFluidEnv`) are mutually exclusive — you cannot have both simultaneously.
+- ❌ No steady-state implicit differentiation — differentiable mode unrolls all PISO time steps (O(N·T) memory)
 - ❌ No heat transfer, no sCO₂, no fabrication constraints
 
-**FluidGym threat assessment**: Medium threat to C2 as currently written (because the "gymnasium-like" language in their README could blur the prior art line), but **does NOT anticipate C1 or the corrected C2 claim**. The key distinction for the patent:
-- C1 (steady-state SIMPLE + fixed-point implicit diff) is unambiguously not in FluidGym — PISO is a different algorithm; transient unrolling is a different differentiation strategy
-- C2 (standard `gymnasium.Env` subclass with SB3 compatibility) is also not met — FluidGym's `FluidEnvLike` protocol is duck-typed, not a true gymnasium subclass; this distinction must be stated explicitly in the C2 claim to avoid a "well, it's basically gymnasium" obviousness challenge
+**FluidGym threat assessment (corrected)**: The earlier claim "FluidGym is not a gymnasium.Env subclass" was wrong — it has `GymFluidEnv(Env)`. The correct framing: **FluidGym's gymnasium wrapper detaches gradients in step(); its differentiable mode does not expose a gymnasium.Env interface. SB3-compatible and differentiable are mutually exclusive in FluidGym.** C2 gap is structural (gradient detachment), not nominal. The C2 claim must be reframed accordingly.
 
-**Action item**: C2 claim language must specify "subclass of `gymnasium.Env` (gymnasium ≥ 0.26)" — not just "gymnasium-compatible API." This excludes FluidGym and gymnax-based HydroGym JAX backend in one phrase.
+**Key insight now consistent across all competitors — the universal split**:
+- HydroGym: differentiable = gymnax interface (not `gymnasium.Env`); gymnasium-compatible = Firedrake (not differentiable)
+- FluidGym: differentiable = native `FluidEnv` (gradient preserved); gymnasium-compatible = `GymFluidEnv` (`.detach()` in `step()`, gradient severed)
+- DiffCFD (proposed): differentiable implicit diff + `gymnasium.Env` subclass where `step()` returns **gradient-attached tensors** — this intersection is empty in all prior work
+
+**Revised C2 patent framing**: The claim is NOT "we subclass gymnasium.Env" (FluidGym does that too, with detach). The claim is: "a `gymnasium.Env` subclass where the differentiable solver's computational graph is preserved through `step()` — no `.detach()` — enabling `policy_gradient()` to return exact analytical gradients." This is the precise, verifiable, source-code-defensible gap.
 
 **HydroGym fact-check** (source code re-confirmed 2026-05-23):
 - ✅ Standard `gymnasium` interface for **Firedrake backend** (FEM, non-differentiable) — `core.py` imports `gymnasium as gym`, SB3 examples use `DummyVecEnv`, PPO, SAC, TD3
@@ -164,7 +170,7 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
       - Memory: O(N) (only flow field + GMRES Krylov vectors, ~10-50 vectors)
       - `torch.func.jvp/vjp` confirmed available in PyTorch 2.8
     - **Preconditioner: pyamg / scipy ILU** — non-differentiable, that's fine; preconditioner only needs to make GMRES converge, not be differentiated through. Use `pyamg` (algebraic multigrid) or `scipy.sparse.linalg.spilu` (ILU). **Acceptance gate: adjoint GMRES converges within 200 iterations at Re=1000.**
-    - **Brinkman stiffness warning**: when Brinkman penalization is active (ε ~ 1e-3 to 1e-5), the zero-order `u/ε` term creates condition number O(1/ε) in the momentum Jacobian. At ε=1e-3, this is manageable with AMG. At ε=1e-5 (needed for sharp interfaces), standard pyamg may fail to precondition adequately. Mitigation: use ε=1e-3 as default and increase only if interface sharpness is insufficient. **Acceptance gate must be tested with Brinkman active, not just on pure fluid domains.**
+    - **Brinkman stiffness warning**: when Brinkman penalization is active (ε ~ 1e-3 to 1e-5), the zero-order `u/ε` term creates condition number O(1/ε) in the momentum Jacobian. At ε=1e-3, this is manageable with AMG. At ε=1e-5 (needed for sharp interfaces), standard pyamg may fail to precondition adequately. Mitigation: use ε=1e-3 as default and increase only if interface sharpness is insufficient. **Acceptance gate must be tested with Brinkman active (ε=1e-3), not just on pure fluid domains** — this is also a prerequisite for C3 (topology optimization relies on Brinkman): if implicit diff fails under Brinkman, C3 is unsupported.
     - Cross-validate: implicit diff gradients must agree with unrolled SIMPLE gradients (v0.05) to < 0.1%
   - Reference: Bai et al. 2019 (DEQ) + JFNK literature for matrix-free Krylov in CFD
 
@@ -186,12 +192,11 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
   - Lid-driven cavity Re=1000 vs Ghia et al. 1982 (L2 error < 2%, grid-converged)
   - Poiseuille flow: analytical solution comparison
   - Backward-facing step Re=800: reattachment length within 5%
-  - **Gradient verification (three-layer, required for C1 patent claim)**:
-    1. `torch.autograd.gradcheck` — catches implementation bugs
-    2. **Complex-step derivative approximation** — machine-precision reference, eliminates FD cancellation error. **Caveat (confirmed by spike test)**: `torch.clamp` and boundary condition operations fail on `complex64` dtype. Complex-step is therefore **not applicable to the full SIMPLE forward pass**. Apply it only to isolated differentiable sub-components (pressure Poisson solve, convection term) where no clamp/relu ops exist. For full-solver gradient verification, use analytical comparison only.
-    3. Analytical: Poiseuille pressure drop ∂ΔP/∂U_inlet = 12μL/h² — closed-form, must match to < 0.01%
-    - All verified layers documented in CN patent filing as proof of "exact gradient" claim
-    - Document this result explicitly in the CN patent filing as proof of "exact gradient" claim
+  - **Gradient verification (for C1 patent claim)**:
+    1. `torch.autograd.gradcheck` — catches implementation bugs; finite-difference precision (~1e-5)
+    2. **Complex-step** — applicable only to isolated sub-components without clamp/relu (confirmed: `torch.clamp` fails on complex64). **NOT applicable to the full SIMPLE forward pass.** Scope: pressure Poisson solve, convection term in isolation.
+    3. Analytical: Poiseuille pressure drop ∂ΔP/∂U_inlet = 12μL/h² — **primary proof of gradient exactness for the full solver** (closed-form, must match to < 0.01%)
+    - In the CN patent filing, describe the gradient proof honestly: "analytical comparison (Poiseuille, <0.01%) is the primary full-solver verification; complex-step provides sub-component verification." Do NOT claim three independent full-solver verification layers when layer 2 only covers sub-components — a false claim of "three-layer full-solver proof" is attackable in examination.
 
 - [ ] `diffcfd/export/vtk.py` — VTK export for ParaView visualization
 
@@ -306,6 +311,12 @@ The laminar NS solver (v0.1) is limited to low-to-moderate Re (< ~2000 in 2D). E
 
 - [ ] Validation: duct flow at Re=10,000 — compare Nusselt number prediction vs Dittus-Boelter correlation (within 15%); this is the acceptance gate for frozen eddy viscosity being useful for heat exchanger design
 
+- [ ] **Frozen μ_t perturbation validity bound (required for downstream v0.4/v0.6 use)**:
+  - Frozen eddy viscosity produces correct gradient direction ONLY for small geometry perturbations — for large changes, μ_t should be recomputed
+  - Determine the perturbation bound: run paired tests where (a) gradient is computed with frozen μ_t, (b) gradient is computed by re-solving RANS after each geometry step; compare gradient direction (cosine similarity). Report the geometry perturbation magnitude at which cosine similarity drops below 0.9.
+  - Document this bound explicitly in v0.35 API and in v0.4/v0.6 optimization workflows: "frozen μ_t valid for perturbations < X% of characteristic length"
+  - In v0.4 airfoil and v0.6 PCHE: add a spot-check step every N optimization iterations where RANS is re-solved to verify the frozen μ_t gradient direction is still reliable
+
 ---
 
 ## v0.4 — Aerodynamic Shape Optimization
@@ -344,7 +355,7 @@ Full integration with [sCO₂-TMSR-Toolkit](https://github.com/OpenLithoHub/sCO2
 **sCO₂ open-source strategy (C4 commercial value protection)**:
 - v0.2 open-sources ideal gas / incompressible thermal solver (no commercial risk)
 - `diffcfd/props/sco2.py` (transcritical surrogate, C4) is **NOT open-sourced at v0.2**
-- C4 remains private until: (a) CN patent for C4 receives receipt (受理通知书), then open-source; OR (b) v0.6 milestone, whichever comes first
+- C4 remains private until: (a) CN patent for C4 receives **申请号 + 申请日 confirmation** (NOT 受理通知书), then open-source; OR (b) v0.6 milestone, whichever comes first
 - Rationale: C4 has standalone commercial value for energy system optimization (sCO₂ power cycle, heat pump, supercritical extraction) — independent of the CFD framework
 
 **Plugin architecture for C4 commercial isolation (implement from v0.2)**:
@@ -369,9 +380,15 @@ A method for computing exact gradients of quantities of interest (drag coefficie
 **Hardware binding for CNIPA eligibility**: Claims are framed as "a GPU tensor computation method for computing gradients of fluid dynamic quantities of interest via matrix-free Krylov-based implicit differentiation through SIMPLE-converged incompressible Navier-Stokes, wherein the Jacobian-vector products are evaluated using automatic differentiation primitives (JVP) on GPU tensor arrays, with O(N) memory complexity." The hardware and memory framing ties the algorithm to specific technical effects and prevents Art. 25 "mathematical method" rejection.
 
 ### C2 — PyTorch-native incompressible FV solver as standard gymnasium.Env with steady-state analytical gradients
-A software interface wrapping a PyTorch-native incompressible finite-volume Navier-Stokes solver as a **subclass of `gymnasium.Env` (gymnasium ≥ 0.26)**, supporting two RL usage modes: (Mode A) single-step contextual bandit for geometry/parameter optimization, where each `step()` runs SIMPLE to a new steady state and returns an analytical gradient via implicit differentiation; (Mode B) sequential quasi-steady-state episode where each `step()` transitions between consecutive steady states under discrete control actions, compatible with standard RL algorithms (PPO, SAC). Both modes provide analytical policy gradients via implicit differentiation (C1). **Sample efficiency claim**: on the Rabault cylinder wake benchmark (Re=100), Analytic Policy Gradient (APG) — which uses the C1 implicit gradient instead of Monte Carlo rollouts — achieves convergence in 10-50× fewer environment interactions than model-free PPO (SB3 baseline). The speedup comes from APG **replacing** PPO with gradient-based policy updates; SB3 PPO is used as the **baseline comparator** and does not itself use or see the analytical gradients. Compatible with Stable-Baselines3 and CleanRL without modification for standard model-free RL; the analytical gradient is exported via `env.policy_gradient()` for APG use.
+A `gymnasium.Env` subclass (gymnasium ≥ 0.26) wrapping a PyTorch-native incompressible finite-volume Navier-Stokes solver, where `step()` returns gradient-attached PyTorch tensors — no `.detach()` call — preserving the autograd computational graph through the differentiable solver. This enables `policy_gradient()` to return exact analytical gradients of the reward with respect to policy parameters via implicit differentiation (C1). The environment supports two RL modes: (Mode A) single-step contextual bandit for geometry/parameter optimization; (Mode B) sequential quasi-steady-state episode compatible with standard RL algorithms (PPO, SAC). Compatible with Stable-Baselines3 and CleanRL for model-free RL; the analytical gradient is exported via `env.policy_gradient()` for APG use.
 
-**Prior art gap (final, after source-code analysis)**: HydroGym has a split architecture — standard `gymnasium` interface exists on Firedrake/MAIA/Nek backends (non-differentiable); differentiable backends (JAX pseudo-spectral, JAX-Fluids compressible) use `gymnax` and inherit `gymnax.environments.environment.Environment`, NOT `gymnasium.Env` — confirmed from current source code `hydrogym/jax/env_core.py`. FluidGym (arXiv:2601.15015) uses PISO transient unrolling (not SIMPLE steady-state implicit diff) and a duck-typed `FluidEnvLike` protocol (NOT a `gymnasium.Env` subclass). The intersection of (differentiable FV steady-state solver) ∩ (true `gymnasium.Env` subclass) ∩ (analytical gradient export) is empty in all prior work. **CNIPA eligibility**: technical effect = 10-50× sample complexity reduction on Rabault cylinder wake (Re=100), measurable.
+**Prior art gap — structural (source-code verified, not README-level)**:
+- HydroGym (commit bf2c2dd2, 2026-05-12): differentiable backends (JAX) use `gymnax.environments.environment.Environment`, NOT `gymnasium.Env`; no `.step()` in gymnasium format
+- FluidGym (commit 5ec3a8784c, 2026-05-06): `GymFluidEnv(gymnasium.Env)` subclass EXISTS but `step()` calls `.detach().cpu().numpy()` on all outputs — autograd graph severed; differentiable mode exposed only through native `FluidEnv` (non-gymnasium)
+- In both tools: (differentiable mode) and (gymnasium.Env-compatible mode) are mutually exclusive
+- DiffCFD is the first tool where a `gymnasium.Env` subclass preserves the autograd graph through `step()`
+
+**CNIPA eligibility**: technical effect = (1) 10-50× sample complexity reduction vs SB3 PPO baseline on Rabault cylinder wake (Re=100), measurable; (2) exact analytical gradient (O(N) memory) vs O(N·T) unrolled PISO in FluidGym, measurable.
 
 **Dependent claim (fallback if pure gymnasium interface deemed obvious)**: C2 combined with C4 — sCO₂ transcritical property surrogate integrated in the gymnasium env reward loop; this combination remains novel independently.
 
@@ -426,19 +443,19 @@ A differentiable neural network surrogate model for supercritical CO₂ thermoph
 
 This plan's competitive moat depends on the following external facts. If any is overturned, the corresponding claim strategy must be revised. Each entry shows what changes if the assumption is wrong.
 
-| Assumption | Last verified | If overturned → |
-|---|---|---|
-| HydroGym differentiable backends use `gymnax`, NOT standard `gymnasium` | 2026-05-23 (source code: `hydrogym/jax/env_core.py` confirmed gymnax import) | C2 loses gymnasium-interface differentiator; C1 (FV/SIMPLE/steady-state) becomes sole claim |
-| HydroGym has no incompressible FV/SIMPLE backend | 2026-05-23 (README + backend dirs) | C1+C2 intersection shrinks; file immediately |
-| FluidGym uses PISO transient (not SIMPLE steady-state) | 2026-05-23 (source: PISOtorch_simulation.py) | C1 directly threatened; file immediately |
-| FluidGym uses `FluidEnvLike` duck-type protocol, NOT `gymnasium.Env` subclass | 2026-05-23 (source: fluid_env.py — inherits ABC + FluidEnvLike, not gymnasium.Env) | C2 narrowed; tighten "subclass of gymnasium.Env" claim language |
-| PhiFlow 3.4.0 has no steady-state implicit diff | 2026-05-23 (releases + README) | C1 threatened; verify immediately |
-| PhiFlow 3.4.0 has no standard gymnasium.Env | 2026-05-23 (README) | C2 threatened |
-| JAX-Fluids covers compressible only (no incompressible) | 2026-05-23 (README confirmed) | C1 scope narrows |
-| jax-cfd is unmaintained | 2026-05-23 (README: "no longer maintained") | If revived, reassess threat level |
-| No existing PyTorch-native incompressible FV + gymnasium.Env subclass + implicit diff package | 2026-05-23 | Core premise of project collapses; do a PyPI/GitHub search before filing |
-| `torch.func.jvp` supports matrix-free GMRES (PyTorch 2.8) | 2026-05-23 (confirmed) | If removed in future PyTorch version, find alternative |
-| `torch.clamp` fails on complex dtype | 2026-05-23 (confirmed by spike) | complex-step applicability unchanged; this blocks full-solver complex-step |
-| HydroGym arXiv:2512.17534 is the correct paper ID | 2026-05-23 (README citation confirmed) | Update reference if wrong |
+| Assumption | Last verified | Source anchor | If overturned → |
+|---|---|---|---|
+| HydroGym differentiable backends use `gymnax`, NOT standard `gymnasium` | 2026-05-23 | jcallaham/hydrogym commit bf2c2dd2, `hydrogym/jax/env_core.py` line 22 | C2 loses gymnasium-interface differentiator; C1 (FV/SIMPLE/steady-state) becomes sole claim |
+| HydroGym has no incompressible FV/SIMPLE backend | 2026-05-23 | README + backend dirs | C1+C2 intersection shrinks; file immediately |
+| FluidGym uses PISO transient (not SIMPLE steady-state) | 2026-05-23 | safe-autonomous-systems/fluidgym commit 5ec3a8784c, `simulation.py` docstring | C1 directly threatened; file immediately |
+| FluidGym's `GymFluidEnv.step()` detaches gradients (`.detach().cpu().numpy()`) | 2026-05-23 | `src/fluidgym/integration/gymnasium.py` `__to_np()` method | C2 core distinction weakens; need alternative framing |
+| PhiFlow 3.4.0 has no steady-state implicit diff | 2026-05-23 | releases + README | C1 threatened; verify immediately |
+| PhiFlow 3.4.0 has no standard gymnasium.Env | 2026-05-23 | README | C2 threatened |
+| JAX-Fluids covers compressible only (no incompressible) | 2026-05-23 | README confirmed | C1 scope narrows |
+| jax-cfd is unmaintained | 2026-05-23 | README: "no longer maintained" | If revived, reassess threat level |
+| No existing tool where differentiable solver + gymnasium.Env + no .detach() in step() | 2026-05-23 | HydroGym + FluidGym source code | Core premise of C2 collapses; do PyPI/GitHub search before filing |
+| `torch.func.jvp` supports matrix-free GMRES (PyTorch 2.8) | 2026-05-23 | confirmed | If removed in future PyTorch version, find alternative |
+| `torch.clamp` fails on complex dtype | 2026-05-23 | confirmed by spike | complex-step applicability unchanged; this blocks full-solver complex-step |
+| HydroGym arXiv:2512.17534 is the correct paper ID | 2026-05-23 | README citation confirmed | Update reference if wrong |
 
-**Review cadence**: check HydroGym and PhiFlow release notes every 2 months. If either adds incompressible FV + gymnasium combination, accelerate CN filing immediately.
+**Review cadence**: check HydroGym and FluidGym release notes every 2 months (assigned: project owner). If either adds incompressible FV + gymnasium combination with gradient-attached step(), accelerate CN filing immediately. Record new commit hashes and dates on each review.
