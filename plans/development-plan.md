@@ -47,16 +47,22 @@
 - No sCO₂ property integration
 - Non-standard tensor abstraction — steep learning curve vs. native PyTorch
 
-**HydroGym fact-check** (critical — was missing from previous plan):
-- ✅ Gymnasium-compatible interface, 61+ environments, actively maintained
-- ✅ Differentiable backends: JAX backend (Kolmogorov flow, channel flow) + JAX-Fluids backend
-- ❌ JAX backend uses **pseudo-spectral + Runge-Kutta-Crank-Nicolson time-stepping** — NOT finite-volume SIMPLE; no steady-state implicit differentiation
-- ❌ JAX-Fluids backend covers only **compressible flows** (Shock Vector Control, turbulent channel) — 2 environments total
-- ❌ Uses `gymnax` (JAX RL library), not standard `gymnasium` — incompatible with Stable-Baselines3, CleanRL by default
-- ❌ No heat transfer, no sCO₂, no fabrication constraints
-- ❌ No PyTorch backend at all
+**HydroGym fact-check** (critical — was missing from previous plan, confirmed from source code):
+- ✅ Standard `gymnasium` interface for **Firedrake backend** (FEM, non-differentiable) — `core.py` imports `gymnasium as gym`, SB3 examples use `DummyVecEnv`, PPO, SAC, TD3
+- ✅ 61+ environments, actively maintained (v1.0.1 released 2026-04), expanding fast
+- ✅ Differentiable backends exist: JAX (Kolmogorov, channel) + JAX-Fluids (compressible only)
+- ❌ **JAX backend (differentiable) uses `gymnax`, NOT standard `gymnasium`** — confirmed from JAX README: "environments follow the gymnax interface (reset_env/step_env with explicit params)"; incompatible with SB3/CleanRL without wrapper
+- ❌ JAX backend uses **pseudo-spectral + Runge-Kutta-Crank-Nicolson transient** — NOT finite-volume SIMPLE; no steady-state implicit differentiation
+- ❌ JAX-Fluids backend: only **2 environments, both compressible** (Shock Vector Control Ma>1, turbulent channel Re_tau=180)
+- ❌ No heat transfer, no sCO₂, no fabrication constraints, no PyTorch
 
-**Revised C2 threat assessment**: HydroGym partially overlaps C2 but does NOT implement the specific combination DiffCFD targets. The original C2 claim "no prior work wraps a true differentiable NS solver as a Gym env" must be narrowed. The accurate statement is: **no prior work provides a PyTorch-native, incompressible finite-volume differentiable solver with steady-state implicit differentiation wrapped as a standard gymnasium.Env**.
+**Critical nuance confirmed by source code**: There are TWO separate interfaces in HydroGym:
+1. **Non-differentiable backends (Firedrake, MAIA, Nek)** → standard `gymnasium` ✅ + SB3 compatible ✅ → **but NOT differentiable**
+2. **Differentiable backends (JAX, JAX-Fluids)** → `gymnax` interface ❌ not standard gymnasium → **differentiable but not SB3 compatible**
+
+The combination "differentiable solver + standard gymnasium" does NOT exist in HydroGym. This confirms the C2 claim stands, but the framing must be precise: the gap is the **intersection of differentiability and standard gymnasium**, not just one or the other.
+
+**Revised C2 threat assessment — final**: C2 survives, but the physical kernel (FV/SIMPLE/steady-state implicit diff) remains the **primary** differentiator; the gymnasium interface is a **secondary** differentiator (HydroGym's differentiable envs use gymnax). HydroGym is rapidly expanding (L4DC 2025, v1.0.1 2026-04) — risk that they add FV incompressible backend within 12-18 months is real. **C1 is the durable claim; C2 must be filed before HydroGym closes the gap.**
 
 **JAX-Fluids does NOT do (confirmed from README):**
 - Incompressible flow (explicitly compressible-only, confirmed)
@@ -75,19 +81,17 @@
 - RL for flow control — Rabault et al. 2019, open literature
 - HydroGym (Gymnasium + CFD combination) — open source MIT license, prior art for generic combination
 
-**Your defensible novelty (revised after HydroGym analysis):**
-- C1: Implicit differentiation through SIMPLE-converged steady-state NS (O(N) memory) — HydroGym uses transient spectral solver, does NOT implement this
-- C2 (**revised**): PyTorch-native incompressible finite-volume differentiable solver wrapped as standard `gymnasium.Env` with analytical steady-state policy gradients via implicit differentiation — HydroGym's differentiable backends are JAX-only and transient-only
+**Your defensible novelty (final revised after full source-code analysis):**
+- C1: Implicit differentiation through SIMPLE-converged steady-state NS — **primary claim, most durable**; HydroGym, PhiFlow, JAX-Fluids all use transient solvers; none implement this
+- C2 (**final framing**): The intersection of (differentiable incompressible FV solver) + (standard `gymnasium.Env` with SB3/CleanRL compatibility) — HydroGym's split: differentiable backends use `gymnax` (not gymnasium); standard gymnasium backends are non-differentiable; the intersection is empty in HydroGym. **Filing urgency: HIGH** — HydroGym may close this gap within 12-18 months; file C2 alongside C1 in CN first application, do not defer to separate filing
 - C3: Coupled shape + BC optimization with fabrication constraints
 - C4: Differentiable sCO₂ transcritical property surrogate
 
-**CNIPA subject-matter eligibility (China):** Per CNIPA Patent Examination Guidelines §2.9, pure algorithms are not patentable; algorithms must be tied to specific technical effects (reduced memory, improved processing speed). C1 has a natural hook: O(N) vs O(N·K) memory, single linear solve replaces K iterations — **write this as "technical effect" explicitly in claims**. C2 needs similar treatment: "reduces policy gradient sample complexity by 10-50x vs model-free RL" as technical effect.
-
-**Patent risks:**
-- HydroGym/Brunton group: MIT license, academic — no known patents on the method; their work is prior art for generic Gym+CFD but not for your specific C1/C2 combination
-- PhiFlow team: Apache 2.0, no known patents
-- NVIDIA Modulus: Surrogate-focused patents, do not block differentiable solver claims
-- **Conclusion: Freedom to operate confirmed for revised C1-C4.**
+**Filing strategy revision (per risk analysis):**
+- CN首申同时覆盖C1+C2（不分开）——HydroGym扩张速度快，C2窗口可能12-18个月内关闭
+- C1+C2共用同一个实施例（cylinder wake：C1提供解析梯度，C2提供gymnasium接口）
+- C3/C4仍分案申请
+- **开源时机**：收到CN受理回执后push，不早于此
 
 ---
 
@@ -227,7 +231,7 @@ A method for computing exact gradients of quantities of interest (drag coefficie
 ### C2 — PyTorch-native incompressible FV solver as standard gymnasium.Env with steady-state analytical gradients
 A software interface wrapping a **PyTorch-native incompressible finite-volume Navier-Stokes solver** as a standard `gymnasium.Env` reinforcement learning environment, providing: (i) physically consistent flow-field observations, (ii) **analytical steady-state policy gradients computed via implicit differentiation** (not finite-difference estimation and not transient-unrolling), and (iii) a unified interface compatible with Stable-Baselines3, CleanRL, and other standard RL libraries. The technical effect is a reduction of 10–50× in policy gradient sample complexity versus model-free RL on the same environment, as the analytical gradient replaces stochastic gradient estimation.
 
-**Prior art gap**: HydroGym (2025) provides Gymnasium-compatible CFD environments with differentiable backends, but its differentiable backends are (a) JAX-only (not PyTorch), (b) use pseudo-spectral transient solvers (not finite-volume SIMPLE), and (c) use `gymnax` not standard `gymnasium`. The specific combination of PyTorch-native + incompressible FV + steady-state implicit differentiation + standard gymnasium interface is not present in HydroGym or any other published work. **CNIPA eligibility**: technical effect claim is the sample complexity reduction (measurable, 10-50× on Rabault cylinder wake benchmark).
+**Prior art gap (final, after source-code analysis)**: HydroGym has a split architecture — standard `gymnasium` interface exists on Firedrake/MAIA/Nek backends (non-differentiable); differentiable backends (JAX pseudo-spectral, JAX-Fluids compressible) use `gymnax` (not standard gymnasium) and are incompatible with SB3/CleanRL. The intersection of (differentiable solver) ∩ (standard gymnasium interface) is **empty in HydroGym**. DiffCFD fills this intersection with incompressible FV + SIMPLE + steady-state implicit differentiation. **CNIPA eligibility**: technical effect = 10-50× reduction in policy gradient sample steps vs model-free RL (Rabault cylinder wake, Re=100), measurable and benchmarkable.
 
 ### C3 — Coupled geometry and boundary condition optimization with manufacturing constraints
 A gradient-based optimization framework for fluid dynamic devices that simultaneously optimizes continuous geometry parameters (B-spline control points) and boundary condition parameters (inlet velocity profile, wall temperature) subject to manufacturing constraints (minimum feature size, minimum wall thickness, curvature radius), using a shared differentiable loss combining fluid dynamic objective and fabrication penalty within a single autograd computational graph.
@@ -251,14 +255,16 @@ A differentiable neural network surrogate model for supercritical CO₂ thermoph
 
 ## Competitive Differentiation Summary
 
-| Feature | DiffCFD | PhiFlow 3.4.0 | JAX-Fluids 2.0 | HydroGym | NVIDIA Modulus |
-|---|---|---|---|---|---|
-| Incompressible FV (SIMPLE) | ✅ | ✅ (projection) | ❌ (compressible) | ❌ (spectral) | ✅ (PINN) |
-| PyTorch-native | ✅ | ✅ (multi-backend) | ❌ (JAX) | ❌ (JAX) | ✅ |
-| Steady-state implicit diff (C1) | ✅ | ❌ (transient) | ❌ | ❌ | ❌ |
-| Standard gymnasium.Env (C2) | ✅ | ❌ | ❌ | ⚠️ (gymnax only) | ❌ |
-| Gymnasium + differentiable backend | ✅ | ❌ | ❌ | ⚠️ (JAX, compressible only) | ❌ |
-| Conjugate heat transfer | ✅ | Partial | ❌ | ❌ | ✅ (surrogate) |
-| sCO₂ property surrogate (C4) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Fabrication constraints (C3) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Actively maintained (2026) | ✅ | ✅ | ✅ | ✅ | ✅ |
+**Key insight from source-code analysis**: HydroGym has a split architecture — standard gymnasium interface exists only on non-differentiable backends (Firedrake/FEM); differentiable backends (JAX) use gymnax. The intersection of "differentiable + standard gymnasium" is **empty in HydroGym**, which is the core of C2.
+
+| Feature | DiffCFD | PhiFlow 3.4.0 | JAX-Fluids 2.0 | HydroGym (Firedrake) | HydroGym (JAX diff.) | NVIDIA Modulus |
+|---|---|---|---|---|---|---|
+| Incompressible FV (SIMPLE) | ✅ | ✅ (projection) | ❌ compressible | ✅ FEM (not FV) | ❌ spectral | ✅ PINN |
+| PyTorch-native | ✅ | ✅ multi-backend | ❌ JAX | ❌ Firedrake | ❌ JAX | ✅ |
+| Steady-state implicit diff (C1) | ✅ | ❌ transient | ❌ | ❌ | ❌ | ❌ |
+| Standard gymnasium.Env | ✅ | ❌ | ❌ | ✅ | ❌ gymnax | ❌ |
+| Differentiable + standard gymnasium (C2 intersection) | ✅ | ❌ | ❌ | ❌ not diff. | ❌ not gymnasium | ❌ |
+| Conjugate heat transfer | ✅ | Partial | ❌ | ❌ | ❌ | ✅ surrogate |
+| sCO₂ property surrogate (C4) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Fabrication constraints (C3) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Actively maintained (2026) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
