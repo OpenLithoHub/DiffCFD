@@ -95,19 +95,41 @@ The combination "differentiable solver + standard gymnasium" does NOT exist in H
 
 ---
 
+## v0.05 Internal Milestone — Unrolled SIMPLE (Risk Gate, Not Released)
+
+**Target:** 3-4 weeks | **Internal only — validates physics before implicit diff**
+
+This phase is not a public release. It de-risks v0.1 by separating two problems:
+(a) correctness of the forward NS solver and boundary conditions
+(b) correctness of the implicit differentiation
+
+- [ ] Implement forward SIMPLE solver (unrolled, full autograd through iterations)
+- [ ] Validate forward field: lid-driven cavity Re=100 vs Ghia et al. 1982
+- [ ] Confirm autograd works through unrolled iterations (gradcheck passes)
+- [ ] Measure memory at N=64²: confirm O(N·K) blowup as expected
+- [ ] This unrolled version is the **cross-validation reference** for v0.1 implicit diff
+- [ ] Do NOT commit to main — keep on `dev/unrolled` branch, never push to public
+
+---
+
 ## v0.1 Milestone — 2D Incompressible NS + Steady-State Implicit Diff
 
-**Target:** 2-3 months | **Gate for CN patent filing**
+**Target:** 2-3 months after v0.05 | **Gate for CN patent filing**
 
 ### Core deliverables
 
 - [ ] `diffcfd/solvers/navier_stokes_2d.py` — differentiable 2D incompressible NS
   - Finite volume on structured Cartesian grid (staggered MAC grid)
   - SIMPLE pressure-velocity coupling for steady state
-  - **Implicit differentiation via fixed-point theorem** (C1) — do NOT unroll solver iterations; instead solve the implicit gradient equation `(∂F/∂u) · du/dθ = -∂F/∂θ` using `torch.linalg.solve`
-  - This gives exact gradients at the cost of one linear solve, vs. storing all SIMPLE iterations
-  - Memory: O(N) instead of O(N·K) where K = number of SIMPLE iterations
-  - Reference: Bai et al. 2019 (DEQ), but applied to NS SIMPLE — **this is the novel part**
+  - **Implicit differentiation via fixed-point theorem** (C1):
+    - Do NOT use `torch.linalg.solve` (dense LAPACK — O(N²) memory, defeats the purpose)
+    - Correct approach: **matrix-free GMRES via `torch.func.jvp`**
+      - The implicit gradient equation `(∂F/∂u)ᵀ · λ = ∂L/∂u` is solved with GMRES
+      - Matvec oracle = `lambda v: torch.func.jvp(F, u, v)[1]` — never materializes Jacobian
+      - Memory: O(N) (only flow field + GMRES Krylov vectors, ~10-50 vectors)
+      - This is the correct O(N) implementation — `torch.func.jvp/vjp` confirmed available in PyTorch 2.8
+    - Cross-validate: implicit diff gradients must agree with unrolled SIMPLE gradients (v0.05) to < 0.1%
+  - Reference: Bai et al. 2019 (DEQ) + JFNK literature for matrix-free Krylov in CFD
 
 - [ ] `diffcfd/solvers/boundary.py`
   - Inlet (Dirichlet velocity), outlet (zero-gradient pressure), no-slip wall, symmetry
@@ -122,9 +144,11 @@ The combination "differentiable solver + standard gymnasium" does NOT exist in H
   - Lid-driven cavity Re=1000 vs Ghia et al. 1982 (L2 error < 2%)
   - Poiseuille flow: analytical solution comparison
   - Backward-facing step Re=800: reattachment length within 5%
-  - **Analytical gradient verification (required for C1 patent claim)**:
-    - Poiseuille flow pressure drop ∂ΔP/∂U_inlet has closed-form solution (ΔP = 12μLU/h²)
-    - Implicit diff gradient must match analytical value to < 0.01% — stronger than `gradcheck` at 1e-4
+  - **Gradient verification (three-layer, required for C1 patent claim)**:
+    1. `torch.autograd.gradcheck` — catches implementation bugs
+    2. Complex-step derivative approximation — machine-precision reference, eliminates finite-difference cancellation error; industry gold standard for gradient verification
+    3. Analytical: Poiseuille pressure drop ∂ΔP/∂U_inlet = 12μL/h² — closed-form, must match to < 0.01%
+    - All three layers documented in CN patent filing as proof of "exact gradient" claim
     - Document this result explicitly in the CN patent filing as proof of "exact gradient" claim
 
 - [ ] `diffcfd/export/vtk.py` — VTK export for ParaView visualization
@@ -164,25 +188,46 @@ The combination "differentiable solver + standard gymnasium" does NOT exist in H
 
 **Target:** 2 months after v0.2
 
-**This is the key differentiator from PhiFlow and JAX-Fluids — neither has this.**
+**This is the key differentiator from PhiFlow and JAX-Fluids.**
 
-- [ ] `diffcfd/envs/base.py` — base `gymnasium.Env` wrapping DiffCFD solver
-  - `step()` returns flow field observation + differentiable reward
-  - `policy_gradient()` — analytical gradient of reward w.r.t. action via autograd (C2)
-  - Both model-free RL (PPO, SAC via step rollouts) and model-based (analytical gradients) supported
+### Architecture note: steady-state solver in MDP context
 
-- [ ] `diffcfd/envs/cylinder_wake.py`
-  - Re=100 cylinder wake suppression (Rabault et al. 2019 benchmark)
-  - Action: cylinder rotation rate
-  - Reward: drag coefficient reduction
-  - Baseline: reproduce Rabault PPO result, then show analytical gradient is 10x more sample-efficient
+Standard Gymnasium is designed for transient MDP (sequential state transitions). A steady-state solver creates a conceptual mismatch that must be explicitly handled. DiffCFD supports two modes:
 
-- [ ] `diffcfd/envs/channel_flow.py`
-  - 2D channel flow with blowing/suction actuators
-  - Action: suction/blowing amplitude at N wall locations
-  - Reward: drag reduction (skin friction coefficient)
+**Mode A — Shape/parameter optimization (single-step contextual bandit):**
+- `env.step(action)` changes geometry/BC parameters → runs SIMPLE to new steady state → returns reward
+- Each `step()` = one full steady-state solve
+- Analytical gradient flows directly from reward through SIMPLE via implicit diff (C1)
+- Use case: heat exchanger fin shape, airfoil drag minimization
+- RL algorithm: policy gradient with analytical gradient (not PPO/SAC — those are for Mode B)
 
-- [ ] Benchmark: compare sample efficiency of model-free RL vs DiffCFD analytical gradients on cylinder wake
+**Mode B — Quasi-steady-state control (sequential episode):**
+- Action changes a control parameter (e.g., inlet velocity, cylinder rotation)
+- Steady state A → control change → steady state B = one MDP step
+- Natural episode length: N control steps before terminal condition
+- Use case: cylinder wake suppression, active flow control
+- RL algorithm: PPO/SAC compatible (standard Gymnasium episode structure)
+- Analytical gradient also available per step (C2 claim)
+
+Both modes share the same `gymnasium.Env` interface. Mode A/B selected via `env_config`.
+
+- [ ] `diffcfd/envs/base.py` — base `gymnasium.Env`
+  - `step()` supports both Mode A (single-step) and Mode B (sequential)
+  - `policy_gradient()` — analytical gradient via implicit diff (C2)
+  - Compatible with Stable-Baselines3, CleanRL (standard gymnasium)
+
+- [ ] `diffcfd/envs/cylinder_wake.py` — Mode B benchmark
+  - Re=100, rotating cylinder action (Rabault et al. 2019 baseline)
+  - Benchmark: DiffCFD analytical gradient vs PPO vs HydroGym-Firedrake PPO
+  - **This is the C2 patent embodiment** — document sample efficiency improvement
+
+- [ ] `diffcfd/envs/heat_exchanger.py` — Mode A benchmark
+  - Fin geometry optimization as single-step contextual bandit
+  - Shows C1+C2 combination: implicit diff (C1) enables Mode A analytical gradient
+
+- [ ] Add to C2 dependent claims (per IP strategy):
+  - Dependent claim: C2 + C4 (sCO₂ property surrogate in the Gymnasium env loop)
+  - Fallback if pure gymnasium interface is deemed obvious: combined C2+C4 remains novel
 
 ---
 
@@ -219,6 +264,12 @@ Full integration with [sCO₂-TMSR-Toolkit](https://github.com/OpenLithoHub/sCO2
   - Chain rule connects geometry → CFD → cycle efficiency end-to-end
 - [ ] FMU export of optimized PCHE geometry for sCO₂-TMSR-Toolkit Modelica models
 
+**sCO₂ open-source strategy (C4 commercial value protection)**:
+- v0.2 open-sources ideal gas / incompressible thermal solver (no commercial risk)
+- `diffcfd/props/sco2.py` (transcritical surrogate, C4) is **NOT open-sourced at v0.2**
+- C4 remains private until: (a) CN patent for C4 receives receipt (受理通知书), then open-source; OR (b) v0.6 milestone, whichever comes first
+- Rationale: C4 has standalone commercial value for energy system optimization (sCO₂ power cycle, heat pump, supercritical extraction) — independent of the CFD framework
+
 ---
 
 ## Patent Claims (Draft — Pre-filing, Confidential)
@@ -229,9 +280,11 @@ A method for computing exact gradients of quantities of interest (drag coefficie
 **Prior art gap**: Fixed-point implicit differentiation is known (Bai et al. 2019, DEQ). Its application to SIMPLE-based incompressible NS with proof that the fixed-point Jacobian is well-conditioned at the converged steady state, and the specific linear system formulation for the NS pressure-velocity coupling, is novel.
 
 ### C2 — PyTorch-native incompressible FV solver as standard gymnasium.Env with steady-state analytical gradients
-A software interface wrapping a **PyTorch-native incompressible finite-volume Navier-Stokes solver** as a standard `gymnasium.Env` reinforcement learning environment, providing: (i) physically consistent flow-field observations, (ii) **analytical steady-state policy gradients computed via implicit differentiation** (not finite-difference estimation and not transient-unrolling), and (iii) a unified interface compatible with Stable-Baselines3, CleanRL, and other standard RL libraries. The technical effect is a reduction of 10–50× in policy gradient sample complexity versus model-free RL on the same environment, as the analytical gradient replaces stochastic gradient estimation.
+A software interface wrapping a PyTorch-native incompressible finite-volume Navier-Stokes solver as a standard `gymnasium.Env`, supporting two RL usage modes: (Mode A) single-step contextual bandit for geometry/parameter optimization, where each `step()` runs SIMPLE to a new steady state and returns an analytical gradient via implicit differentiation; (Mode B) sequential quasi-steady-state episode where each `step()` transitions between consecutive steady states under discrete control actions, compatible with standard RL algorithms (PPO, SAC). Both modes provide analytical policy gradients via implicit differentiation (C1), reducing policy gradient sample complexity by 10-50× versus model-free RL. Compatible with Stable-Baselines3 and CleanRL without modification.
 
-**Prior art gap (final, after source-code analysis)**: HydroGym has a split architecture — standard `gymnasium` interface exists on Firedrake/MAIA/Nek backends (non-differentiable); differentiable backends (JAX pseudo-spectral, JAX-Fluids compressible) use `gymnax` (not standard gymnasium) and are incompatible with SB3/CleanRL. The intersection of (differentiable solver) ∩ (standard gymnasium interface) is **empty in HydroGym**. DiffCFD fills this intersection with incompressible FV + SIMPLE + steady-state implicit differentiation. **CNIPA eligibility**: technical effect = 10-50× reduction in policy gradient sample steps vs model-free RL (Rabault cylinder wake, Re=100), measurable and benchmarkable.
+**Prior art gap (final, after source-code analysis)**: HydroGym has a split architecture — standard `gymnasium` interface exists on Firedrake/MAIA/Nek backends (non-differentiable); differentiable backends (JAX pseudo-spectral, JAX-Fluids compressible) use `gymnax` and are incompatible with SB3/CleanRL. The intersection of (differentiable FV steady-state solver) ∩ (standard gymnasium) ∩ (analytical gradient export) is empty in all prior work. **CNIPA eligibility**: technical effect = 10-50× sample complexity reduction on Rabault cylinder wake (Re=100), measurable.
+
+**Dependent claim (fallback if pure gymnasium interface deemed obvious)**: C2 combined with C4 — sCO₂ transcritical property surrogate integrated in the gymnasium env reward loop; this combination remains novel independently.
 
 ### C3 — Coupled geometry and boundary condition optimization with manufacturing constraints
 A gradient-based optimization framework for fluid dynamic devices that simultaneously optimizes continuous geometry parameters (B-spline control points) and boundary condition parameters (inlet velocity profile, wall temperature) subject to manufacturing constraints (minimum feature size, minimum wall thickness, curvature radius), using a shared differentiable loss combining fluid dynamic objective and fabrication penalty within a single autograd computational graph.
@@ -248,8 +301,9 @@ A differentiable neural network surrogate model for supercritical CO₂ thermoph
 - Rabault et al. (2019) — RL for active flow control. JFM ← prior art; C2 is novel as software architecture
 - Pironneau (1974), Jameson (1988) — Adjoint CFD. ← foundational prior art, does not block C1
 - JAX-Fluids paper (2024, CPC) — compressible differentiable CFD; explicitly out of scope of DiffCFD
-- HydroGym (Clagemann et al., L4DC 2025, arXiv:2512.17534) — Gymnasium-compatible CFD RL platform; prior art for generic Gym+CFD; does NOT implement PyTorch FV + steady-state implicit diff
-- PhiFlow paper (Holl & Thuerey, ICML 2024) ← prior art (note: NOT "Holl et al. 2020 ICLR", that was an older version)
+- HydroGym (Clagemann et al., L4DC 2025, arXiv:2512.17534) — Gymnasium-compatible CFD RL; differentiable backends use gymnax (not gymnasium) + transient spectral; does NOT implement PyTorch FV + steady-state implicit diff
+- jax-cfd (Kochkov et al., PNAS 2021, google/jax-cfd) — **unmaintained** (confirmed from README: "no longer maintained"); incompressible FVM + spectral, JAX only, no gymnasium, no steady-state implicit diff; cited for completeness
+- PhiFlow paper (Holl & Thuerey, ICML 2024) ← prior art (note: NOT "Holl et al. 2020 ICLR")
 
 ---
 
