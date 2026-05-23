@@ -183,6 +183,13 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
 - [ ] Validate forward field: lid-driven cavity Re=100 vs Ghia et al. 1982
 - [ ] Confirm autograd works through unrolled iterations (gradcheck passes)
 - [ ] Measure memory at N=64²: confirm O(N·K) blowup as expected
+- [ ] **Anderson Acceleration (optional, add after baseline converges)**:
+  - Wrap the SIMPLE velocity/pressure update loop with Anderson mixing (history depth m=5)
+  - Implementation: maintain the last m residual vectors; solve a small m×m least-squares at each iteration to extrapolate the next iterate
+  - Expected gain: 50–80% reduction in iteration count to convergence (Anderson 1965; well-documented for fixed-point solvers)
+  - This is a pure engineering optimization — not a patent claim, no novelty requirement
+  - **Compatibility with C1**: Anderson acceleration changes how you reach the fixed point, not the fixed point itself. The implicit gradient in v0.1 is computed at the converged state using the unrelaxed physics residual R — Anderson does not affect this. The two are fully orthogonal.
+  - Acceptance gate: measure wall-clock convergence time on lid-driven cavity Re=100 and Re=1000 with and without Anderson; report speedup factor
 - [ ] This unrolled version is the **cross-validation reference** for v0.1 implicit diff
 - [ ] Do NOT commit to main — keep on `dev/unrolled` branch, never push to public
 
@@ -198,9 +205,9 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
   - Finite volume on structured Cartesian grid (staggered MAC grid)
   - SIMPLE pressure-velocity coupling for steady state
   - **Implicit differentiation via fixed-point theorem** (C1) — **dual-function architecture (critical)**:
-    - **Forward pass**: under-relaxed SIMPLE iteration to convergence. Under-relaxation (α ≈ 0.3–0.7 on velocity, 0.1–0.3 on pressure) is required for stability; without it, SIMPLE diverges at Re > ~100.
+    - **Forward pass**: under-relaxed SIMPLE iteration to convergence, optionally with Anderson Acceleration (history depth m=5) for faster convergence. Under-relaxation (α ≈ 0.3–0.7 on velocity, 0.1–0.3 on pressure) is required for stability; without it, SIMPLE diverges at Re > ~100. **Anderson acceleration is a forward-only component — it must not be applied to or confused with the backward residual function.**
     - **Backward pass (implicit gradient)**: the fixed-point is defined by the **pure physics residual** `R(u*, θ) = 0`, NOT by the relaxed iteration map. This distinction is critical: under-relaxation modifies the iteration `u_{k+1} = u_k + α·(F(u_k) - u_k)` but does NOT change the fixed point `u*` (where `F(u*) = u*`). The Jacobian `∂R/∂u` evaluated at `u*` must be computed from the unrelaxed physics residual `R`. **If you naively use the relaxed iteration as the operator in `jvp`, the Jacobian is wrong by a factor related to (1-α); gradients will be systematically off.** Solution: maintain two separate functions — `simulate(theta)` (forward, uses relaxation) and `residual(u, theta)` (pure NS residual, no relaxation) — and pass only `residual` to the GMRES `jvp` oracle.
-    - This **"dual-function architecture"** must be stated explicitly in the C1 patent claim as a distinguishing technical detail: it is the specific implementation that ensures the implicit gradient is exact at the converged steady state.
+    - This **"dual-function architecture"** must be stated explicitly in the C1 patent claim as a distinguishing technical detail: it is the specific implementation that ensures the implicit gradient is exact at the converged steady state. A corollary of this architecture: the backward pass depends only on the value of the physics residual `R(u*, θ)` at the converged fixed point, not on the iteration trajectory taken to reach it. This means the forward solver is free to use any convergence acceleration technique (Anderson Acceleration, momentum restart, etc.) without affecting gradient correctness — a property that should be noted in the C1 claim description as evidence of the method's engineering generality.
     - Do NOT use `torch.linalg.solve` (dense LAPACK — O(N²) memory, defeats the purpose)
     - Correct backward: **matrix-free GMRES via `torch.func.jvp(residual, u, v)[1]`**
       - The adjoint equation `(∂R/∂u)ᵀ · λ = ∂L/∂u` is solved with GMRES using the matvec oracle

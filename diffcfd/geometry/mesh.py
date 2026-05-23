@@ -53,16 +53,19 @@ class CartesianMesh:
         """Convert a signed distance field to a smooth Brinkman fluid mask χ(φ).
 
         χ = 1 in fluid (φ > 0), χ = 0 in solid (φ < 0).
-        Uses a smooth Heaviside with sharpness β (β-continuation: start at β=1,
-        progressively increase to sharpen the interface during optimization).
+        Uses the smooth Heaviside from Lazarov & Sigmund 2016:
+            χ(φ) = 0.5 + 0.5 * tanh(β * φ / (2 * max_sdf))
+        where β controls interface sharpness (β-continuation: start at 1, increase).
 
         Args:
             sdf: Signed distance field tensor (ny, nx). Positive inside fluid.
-            epsilon: Brinkman penalization coefficient (1/ε added in solid cells).
-                     1e-3 is the default; increase sharpness only if needed.
-            beta: Heaviside sharpness parameter. Higher = sharper interface.
+            epsilon: Brinkman penalization coefficient.  Not used here (passed to
+                     the momentum equation externally); kept for API consistency.
+            beta: Heaviside sharpness.  β=1 → very smooth; β=32 → near step function.
 
         Returns:
             mask: Fluid volume fraction χ ∈ [0, 1], shape (ny, nx).
         """
-        raise NotImplementedError("Implement in v0.05 — smooth Heaviside Brinkman mask.")
+        # Normalise by max |sdf| so β is dimensionless and mesh-size independent.
+        scale = sdf.abs().max().clamp(min=1e-8)
+        return 0.5 + 0.5 * torch.tanh(beta * sdf / (2.0 * scale))
