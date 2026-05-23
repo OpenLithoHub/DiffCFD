@@ -9,9 +9,12 @@
 ## Patent Strategy
 
 1. Implement core algorithms locally (do NOT push until CN filing)
-2. Submit China invention patent application (locks priority date)
-3. Push code to GitHub the same day or next day (open source)
-4. File PCT within 12 months using CN filing as priority base
+2. Submit China invention patent application — this establishes the **申请日 (filing date)**
+3. **Open-source gate: push ONLY after receiving 申请号 + 申请日 confirmation** (NOT after 受理通知书, which arrives days/weeks after filing and is a formality check, not the priority date anchor)
+4. File PCT within 12 months using CN filing date as priority base
+
+**Legal basis for the open-source gate (must not be misunderstood):**
+China Patent Law Art. 24 grace period covers ONLY four narrow categories: (1) state-of-emergency first public disclosure for public interest, (2) first display at a government-recognized international exhibition, (3) first publication at a designated academic/technical conference, (4) unauthorized disclosure by a third party without the inventor's consent. **GitHub open-source push falls into NONE of these categories.** A pre-filing GitHub push permanently destroys novelty in China with zero grace period available. There is no rescue path.
 
 **Patent strategy note (revised per legal risk analysis):**
 - CN首申只覆盖v0.1已验证的**C1**（稳态隐式微分+Poiseuille解析梯度验证作为实施例）
@@ -89,9 +92,10 @@ The combination "differentiable solver + standard gymnasium" does NOT exist in H
 
 **Filing strategy revision (per risk analysis):**
 - CN首申同时覆盖C1+C2（不分开）——HydroGym扩张速度快，C2窗口可能12-18个月内关闭
+- C2无宽限期退路：即便自己先开源C2实现，中国也无法靠宽限期补救（理由同上，GitHub公开不属于Art.24四类情形）。这进一步强化"C1+C2合并首申、不可拖延"的结论
 - C1+C2共用同一个实施例（cylinder wake：C1提供解析梯度，C2提供gymnasium接口）
 - C3/C4仍分案申请
-- **开源时机**：收到CN受理回执后push，不早于此
+- **开源时机**：收到**申请号 + 申请日确认**后push（不是受理通知书——受理通知书是形式审查回执，晚于申请日数天到数周，不是优先权锚点）
 
 ---
 
@@ -127,7 +131,8 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
       - The implicit gradient equation `(∂F/∂u)ᵀ · λ = ∂L/∂u` is solved with GMRES
       - Matvec oracle = `lambda v: torch.func.jvp(F, u, v)[1]` — never materializes Jacobian
       - Memory: O(N) (only flow field + GMRES Krylov vectors, ~10-50 vectors)
-      - This is the correct O(N) implementation — `torch.func.jvp/vjp` confirmed available in PyTorch 2.8
+      - `torch.func.jvp/vjp` confirmed available in PyTorch 2.8
+    - **Preconditioner required for high Re** (new deliverable): at Re≥1000, the adjoint linear system condition number degrades; plain GMRES may not converge. Implement block-Jacobi preconditioner (or pressure-velocity physics-based preconditioner). **Acceptance gate: adjoint GMRES converges within 200 iterations at Re=1000.**
     - Cross-validate: implicit diff gradients must agree with unrolled SIMPLE gradients (v0.05) to < 0.1%
   - Reference: Bai et al. 2019 (DEQ) + JFNK literature for matrix-free Krylov in CFD
 
@@ -140,15 +145,16 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
   - B-spline parameterized wall: smooth geometry → mesh → differentiable
 
 - [ ] Validation suite (mandatory before CN filing):
-  - Lid-driven cavity Re=100 vs Ghia et al. 1982 (L2 error < 1%)
-  - Lid-driven cavity Re=1000 vs Ghia et al. 1982 (L2 error < 2%)
+  - **Grid convergence study** (Richardson extrapolation on lid-driven cavity): run at 32², 64², 128² to confirm mesh-independent result before reporting error vs Ghia — prevents "numbers were tuned" critique in patent examination
+  - Lid-driven cavity Re=100 vs Ghia et al. 1982 (L2 error < 1%, grid-converged)
+  - Lid-driven cavity Re=1000 vs Ghia et al. 1982 (L2 error < 2%, grid-converged)
   - Poiseuille flow: analytical solution comparison
   - Backward-facing step Re=800: reattachment length within 5%
   - **Gradient verification (three-layer, required for C1 patent claim)**:
     1. `torch.autograd.gradcheck` — catches implementation bugs
-    2. Complex-step derivative approximation — machine-precision reference, eliminates finite-difference cancellation error; industry gold standard for gradient verification
+    2. **Complex-step derivative approximation** — machine-precision reference, eliminates FD cancellation error. **Caveat (confirmed by spike test)**: `torch.clamp` and boundary condition operations fail on `complex64` dtype. Complex-step is therefore **not applicable to the full SIMPLE forward pass**. Apply it only to isolated differentiable sub-components (pressure Poisson solve, convection term) where no clamp/relu ops exist. For full-solver gradient verification, use analytical comparison only.
     3. Analytical: Poiseuille pressure drop ∂ΔP/∂U_inlet = 12μL/h² — closed-form, must match to < 0.01%
-    - All three layers documented in CN patent filing as proof of "exact gradient" claim
+    - All verified layers documented in CN patent filing as proof of "exact gradient" claim
     - Document this result explicitly in the CN patent filing as proof of "exact gradient" claim
 
 - [ ] `diffcfd/export/vtk.py` — VTK export for ParaView visualization
@@ -200,6 +206,7 @@ Standard Gymnasium is designed for transient MDP (sequential state transitions).
 - Analytical gradient flows directly from reward through SIMPLE via implicit diff (C1)
 - Use case: heat exchanger fin shape, airfoil drag minimization
 - RL algorithm: policy gradient with analytical gradient (not PPO/SAC — those are for Mode B)
+- **Why gymnasium interface for Mode A?** Mode A is deterministic optimization, not sequential MDP. Rationale for keeping gymnasium interface: (1) enables SB3/CleanRL ecosystem reuse without modification; (2) unified API lets users switch Mode A↔B without code changes; (3) contextual bandit IS a degenerate MDP (episode length = 1) and is valid gymnasium usage. This must be explicitly stated in patent claims to address "software interface is not a technical feature" objection — the technical effect is the analytical gradient, not the interface itself.
 
 **Mode B — Quasi-steady-state control (sequential episode):**
 - Action changes a control parameter (e.g., inlet velocity, cylinder rotation)
@@ -298,12 +305,13 @@ A differentiable neural network surrogate model for supercritical CO₂ thermoph
 
 - Patankar & Spalding (1972) — SIMPLE algorithm. ← public domain, not patentable
 - Bai et al. (2019) — Deep Equilibrium Models (implicit differentiation). NeurIPS 2019 ← prior art for fixed-point diff; C1 is novel application
-- Rabault et al. (2019) — RL for active flow control. JFM ← prior art; C2 is novel as software architecture
+- Rabault et al. (2019) — RL for active flow control. JFM ← prior art; C2 is novel as specific combination
 - Pironneau (1974), Jameson (1988) — Adjoint CFD. ← foundational prior art, does not block C1
 - JAX-Fluids paper (2024, CPC) — compressible differentiable CFD; explicitly out of scope of DiffCFD
-- HydroGym (Clagemann et al., L4DC 2025, arXiv:2512.17534) — Gymnasium-compatible CFD RL; differentiable backends use gymnax (not gymnasium) + transient spectral; does NOT implement PyTorch FV + steady-state implicit diff
-- jax-cfd (Kochkov et al., PNAS 2021, google/jax-cfd) — **unmaintained** (confirmed from README: "no longer maintained"); incompressible FVM + spectral, JAX only, no gymnasium, no steady-state implicit diff; cited for completeness
-- PhiFlow paper (Holl & Thuerey, ICML 2024) ← prior art (note: NOT "Holl et al. 2020 ICLR")
+- HydroGym (Clagemann et al., L4DC 2025, arXiv:2512.17534) — Gymnasium-compatible CFD RL; differentiable backends use gymnax + transient spectral; does NOT implement PyTorch FV + steady-state implicit diff
+- jax-cfd (Kochkov et al., PNAS 2021, google/jax-cfd) — **unmaintained** (README confirmed); incompressible FVM + spectral, JAX only, no gymnasium, no steady-state implicit diff
+- **PhiFlow** primary citation: Holl & Thuerey, ICML 2024 ← official required citation
+- **PhiFlow** secondary citation: Holl et al., ICLR 2020, "Learning to Control PDEs with Differentiable Physics" ← also required per official README; both must appear in prior art list
 
 ---
 
@@ -322,3 +330,24 @@ A differentiable neural network surrogate model for supercritical CO₂ thermoph
 | sCO₂ property surrogate (C4) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Fabrication constraints (C3) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Actively maintained (2026) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+---
+
+## Assumptions & To-Verify (Review Periodically)
+
+This plan's competitive moat depends on the following external facts. If any is overturned, the corresponding claim strategy must be revised. Each entry shows what changes if the assumption is wrong.
+
+| Assumption | Last verified | If overturned → |
+|---|---|---|
+| HydroGym differentiable backends use `gymnax`, NOT standard `gymnasium` | 2026-05-23 (source code confirmed) | C2 loses gymnasium-interface differentiator; C1 (FV/SIMPLE/steady-state) becomes sole claim |
+| HydroGym has no incompressible FV/SIMPLE backend | 2026-05-23 (README + backend dirs) | C1+C2 intersection shrinks; file immediately |
+| PhiFlow 3.4.0 has no steady-state implicit diff | 2026-05-23 (releases + README) | C1 threatened; verify immediately |
+| PhiFlow 3.4.0 has no standard gymnasium.Env | 2026-05-23 (README) | C2 threatened |
+| JAX-Fluids covers compressible only (no incompressible) | 2026-05-23 (README confirmed) | C1 scope narrows |
+| jax-cfd is unmaintained | 2026-05-23 (README: "no longer maintained") | If revived, reassess threat level |
+| No existing PyTorch-native incompressible FV + gymnasium + implicit diff package | 2026-05-23 | Core premise of project collapses; do a PyPI/GitHub search before filing |
+| `torch.func.jvp` supports matrix-free GMRES (PyTorch 2.8) | 2026-05-23 (confirmed) | If removed in future PyTorch version, find alternative |
+| `torch.clamp` fails on complex dtype | 2026-05-23 (confirmed by spike) | complex-step applicability unchanged; this blocks full-solver complex-step |
+| HydroGym arXiv:2512.17534 is the correct paper ID | 2026-05-23 (README citation confirmed) | Update reference if wrong |
+
+**Review cadence**: check HydroGym and PhiFlow release notes every 2 months. If either adds incompressible FV + gymnasium combination, accelerate CN filing immediately.
