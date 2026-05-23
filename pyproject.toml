@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.8"]
+build-backend = "hatchling.build"
+
+[project]
+name = "diffcfd"
+version = "0.0.1.dev0"
+description = "Differentiable Computational Fluid Dynamics for Steady-State Inverse Design and Reinforcement Learning"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+    "scipy",
+    "gymnasium>=0.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pyamg",
+    "matplotlib",
+]
+vtk = [
+    "vtk",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["diffcfd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests that require a full solver run (deselect with -m 'not slow')",
+    "validation: marks tests against reference data (Ghia 1982, analytical solutions)",
+]

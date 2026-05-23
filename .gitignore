@@ -8,9 +8,16 @@ dist/
 build/
 .venv/
 *.egg
+*.so
 
 # Jupyter
 .ipynb_checkpoints/
+notebooks/*.ipynb
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
 
 # OS
 .DS_Store
