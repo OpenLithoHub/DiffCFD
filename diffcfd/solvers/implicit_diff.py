@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from typing import Callable
 
+import torch
 from torch import Tensor
+
+from diffcfd.utils.linalg import gmres_matfree
 
 
 def fixed_point_gradient(
@@ -42,4 +45,18 @@ def fixed_point_gradient(
     Returns:
         dL/dθ tensor, same shape as theta.
     """
-    raise NotImplementedError("Implement in v0.1 — GMRES implicit diff (C1).")
+    u_star_d = u_star.detach()
+    theta_d = theta.detach().requires_grad_(True)
+
+    def matvec_Jt(v: Tensor) -> Tensor:
+        # (∂R/∂u)ᵀ v via vjp: vjp(u → R(u, θ), u*)[v]
+        _, vjp_fn = torch.func.vjp(lambda u: residual_fn(u, theta_d), u_star_d)
+        return vjp_fn(v)[0]
+
+    lambda_, _ = gmres_matfree(matvec_Jt, loss_grad.detach(), tol=tol, max_iter=max_iter)
+
+    # dL/dθ = -(∂R/∂θ)ᵀ λ
+    _, vjp_fn_theta = torch.func.vjp(lambda th: residual_fn(u_star_d, th), theta_d)
+    dL_dtheta = -vjp_fn_theta(lambda_.detach())[0]
+
+    return dL_dtheta

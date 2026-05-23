@@ -41,6 +41,91 @@ from torch import Tensor
 
 from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.solvers.boundary import BoundaryConditions
+from diffcfd.solvers.implicit_diff import fixed_point_gradient
+
+
+class _SteadyStateNS(torch.autograd.Function):
+    """Custom autograd Function for implicit differentiation through SIMPLE.
+
+    Forward pass: run SIMPLE (non-differentiable, under-relaxed).
+    Backward pass: solve adjoint via matrix-free GMRES on unrelaxed residual.
+
+    ctx.saved_tensors: (u_star, theta) — packed interior velocity + design param.
+    ctx.solver, ctx.case, ctx.p, ctx.sdf: stored for backward use.
+    """
+
+    @staticmethod
+    def forward(ctx, theta, solver, case, sdf):
+        # Detach theta so SIMPLE runs without tracking gradients
+        theta_val = theta.detach()
+        if case == "channel":
+            ux, uy, p, a_ux, a_uy = solver._run_simple(
+                sdf, inlet_velocity=theta_val, lid_velocity=0.0, case=case,
+                return_aP=True
+            )
+        else:
+            ux, uy, p, a_ux, a_uy = solver._run_simple(
+                sdf, inlet_velocity=0.0, lid_velocity=theta_val, case=case,
+                return_aP=True
+            )
+        u_star = solver._pack_interior(ux, uy).detach()
+        ctx.save_for_backward(u_star, theta)
+        ctx.solver = solver
+        ctx.case = case
+        ctx.p = p.detach()
+        ctx.sdf = sdf
+        ctx.a_ux = a_ux.detach()
+        ctx.a_uy = a_uy.detach()
+        return ux.detach(), uy.detach(), p.detach()
+
+    @staticmethod
+    def backward(ctx, dL_dux, dL_duy, dL_dp):
+        u_star, theta = ctx.saved_tensors
+        solver = ctx.solver
+        p = ctx.p
+        case = ctx.case
+        nx, ny = solver.nx, solver.ny
+
+        brinkman = None
+        if ctx.sdf is not None:
+            bk_eps = 1e-3
+            chi = solver.mesh.sdf_to_mask(ctx.sdf, epsilon=bk_eps)
+            brinkman = ((1.0 - chi) / bk_eps).detach()
+
+        # Combined (u, p) fixed-point residual: F = [R_u(u,p,theta); div(u)]
+        # Solve adjoint system (dF/dz)^T lambda = dL/dz, then dL/dtheta = -(dF/dtheta)^T lambda
+        # This correctly handles pressure-velocity coupling via the fixed-point theorem.
+        p_star = p.flatten()
+        z_star = torch.cat([u_star, p_star])
+        n_u = u_star.shape[0]
+
+        loss_u = torch.cat([
+            dL_dux[1:-1, 1:-1].flatten(),
+            dL_duy[1:-1, :].flatten(),
+        ])
+        loss_z = torch.cat([loss_u, dL_dp.flatten()])
+
+        theta_d = theta.detach().requires_grad_(True)
+
+        def combined_res(z, th):
+            return solver._combined_residual(z, th, n_u, case, brinkman)
+
+        def matvec_Jt(v):
+            _, vjp_fn = torch.func.vjp(
+                lambda z: combined_res(z, theta_d), z_star.detach()
+            )
+            return vjp_fn(v)[0]
+
+        from diffcfd.utils.linalg import gmres_matfree
+        lambda_sol, _ = gmres_matfree(
+            matvec_Jt, loss_z.detach(), tol=1e-5, max_iter=2000, restart=200
+        )
+
+        _, vjp_th = torch.func.vjp(
+            lambda th: combined_res(z_star.detach(), th), theta_d
+        )
+        dL_dtheta = -vjp_th(lambda_sol.detach())[0]
+        return dL_dtheta, None, None, None
 
 
 class NavierStokes2D:
@@ -96,7 +181,43 @@ class NavierStokes2D:
     ) -> tuple[Tensor, Tensor, Tensor]:
         """Run SIMPLE to steady state.
 
+        When backward="implicit_diff", wraps the SIMPLE forward pass with a
+        custom autograd Function that uses matrix-free GMRES for the backward.
+
         Returns: (ux, uy, p).
+        """
+        if self.backward == "implicit_diff":
+            # theta is the differentiable scalar design parameter
+            if case == "channel":
+                theta = (
+                    inlet_velocity
+                    if isinstance(inlet_velocity, Tensor)
+                    else torch.tensor(float(inlet_velocity), dtype=torch.float32,
+                                      device=self.device)
+                )
+            else:
+                theta = (
+                    lid_velocity
+                    if isinstance(lid_velocity, Tensor)
+                    else torch.tensor(float(lid_velocity), dtype=torch.float32,
+                                      device=self.device)
+                )
+            return _SteadyStateNS.apply(theta, self, case, sdf)
+        else:
+            return self._run_simple(sdf, inlet_velocity, lid_velocity, case)
+
+    def _run_simple(
+        self,
+        sdf: Tensor | None = None,
+        inlet_velocity: float | Tensor = 1.0,
+        lid_velocity: float | Tensor = 0.0,
+        case: str = "channel",
+        return_aP: bool = False,
+    ) -> tuple:
+        """Core SIMPLE iteration loop.
+
+        Args:
+            return_aP: If True, return (ux, uy, p, a_ux, a_uy); else (ux, uy, p).
         """
         dx = self.mesh.dx
         dy = self.mesh.dy
@@ -140,9 +261,9 @@ class NavierStokes2D:
             L_p, pin = _build_pressure_system(a_ux, a_uy, dx, dy, nx, ny)
             p_prime = _solve_sparse(-div_star.detach().numpy(), L_p, pin, nx, ny, dev)
 
-            # Step 3: velocity correction  Δu = (1/a_P) * ∇p'
-            ux_new = ux_star - _vcorr_x(p_prime, a_ux, dx, nx, ny)
-            uy_new = uy_star - _vcorr_y(p_prime, a_uy, dy, nx, ny)
+            # Step 3: velocity correction  Δu = (dy/dx) * ∇p' / a_P
+            ux_new = ux_star - _vcorr_x(p_prime, a_ux, dx, dy, nx, ny)
+            uy_new = uy_star - _vcorr_y(p_prime, a_uy, dx, dy, nx, ny)
 
             # Step 4: pressure update with relaxation
             # Velocity under-relaxation is already embedded in the momentum system
@@ -152,7 +273,8 @@ class NavierStokes2D:
             ux_new, uy_new, p_new = self._apply_bcs(
                 ux_new, uy_new, p_new, inlet_velocity, lid_velocity, case
             )
-            p_new = self.bc.apply_pressure_reference(p_new)
+            # Pin pressure gauge at outlet-center cell (same cell as linear-system pin)
+            p_new = p_new - p_new[ny // 2, nx - 1]
 
             with torch.no_grad():
                 res = _divergence(ux_new, uy_new, dx, dy).abs().max().item()
@@ -161,11 +283,334 @@ class NavierStokes2D:
             if res < self.tol:
                 break
 
+        if return_aP:
+            return ux, uy, p, a_ux, a_uy
         return ux, uy, p
 
     def pressure_drop(self, ux: Tensor, uy: Tensor, p: Tensor) -> Tensor:
         """Scalar ΔP = mean(p[:, 0]) − mean(p[:, -1]). Differentiable."""
         return p[:, 0].mean() - p[:, -1].mean()
+
+    def _pack_interior(self, ux: Tensor, uy: Tensor) -> Tensor:
+        """Flatten interior velocity components into a single vector.
+
+        Interior ux: rows j=1..ny-2, cols 1..nx-1  → (ny-2)*(nx-1) elements
+        Interior uy: rows j=1..ny-1, all cols       → (ny-1)*nx elements
+        """
+        return torch.cat([ux[1:-1, 1:-1].flatten(), uy[1:-1, :].flatten()])
+
+    def _unpack_interior(self, u_flat: Tensor) -> tuple[Tensor, Tensor]:
+        """Inverse of _pack_interior. Returns (ux_int, uy_int) without BCs."""
+        nx, ny = self.nx, self.ny
+        n_ux = (ny - 2) * (nx - 1)
+        ux_int = u_flat[:n_ux].reshape(ny - 2, nx - 1)
+        uy_int = u_flat[n_ux:].reshape(ny - 1, nx)
+        return ux_int, uy_int
+
+    def _residual_flat(
+        self,
+        u_flat: Tensor,
+        theta: Tensor,
+        p: Tensor,
+        case: str,
+        brinkman: Tensor | None = None,
+    ) -> Tensor:
+        """Pure-PyTorch unrelaxed NS momentum residual at state u_flat.
+
+        No relaxation, no scipy — compatible with torch.func.vjp for implicit diff.
+
+        Args:
+            u_flat: Packed interior velocity state from _pack_interior.
+            theta: Design parameter (scalar inlet_velocity or lid_velocity).
+            p: Converged pressure field (ny, nx), treated as constant.
+            case: "channel" or "cavity".
+            brinkman: Optional Brinkman penalization (ny, nx); zeros if None.
+
+        Returns:
+            Residual vector, same shape as u_flat.
+        """
+        nx, ny = self.nx, self.ny
+        dx, dy, nu = self.mesh.dx, self.mesh.dy, self._nu
+        dev = u_flat.device
+        dt = u_flat.dtype
+
+        if brinkman is None:
+            brinkman = torch.zeros(ny, nx, device=dev, dtype=dt)
+
+        ux_int, uy_int = self._unpack_interior(u_flat)
+
+        # Build full fields with BCs (no autograd through BC enforcement itself)
+        ux = torch.zeros(ny, nx + 1, device=dev, dtype=dt)
+        uy = torch.zeros(ny + 1, nx, device=dev, dtype=dt)
+
+        ux[1:-1, 1:-1] = ux_int   # interior x-faces
+        uy[1:-1, :] = uy_int      # interior y-faces
+
+        # Boundary values
+        if case == "channel":
+            ux[:, 0] = theta            # inlet: all rows set to theta
+            ux[:, -1] = ux[:, -2]      # outlet zero-gradient (Neumann)
+            # top/bottom walls: ux rows 0 and -1 already 0 (zeros_like)
+        elif case == "cavity":
+            ux[-1, :] = theta           # lid: top row = theta (lid_velocity)
+            # top/bottom: ux rows 0 and -1 already 0
+
+        # Wall BCs for uy (all cases): uy[0,:]=0 and uy[-1,:]=0 already 0
+        if case == "cavity":
+            uy[:, 0] = 0.0             # left/right walls for uy
+            uy[:, -1] = 0.0
+
+        # ------------------------------------------------------------------
+        # u-momentum residual for interior ux faces: j=1..ny-2, ii=0..nx-2
+        # physical col = ii+1, so ux[:, 1:-1] are the interior faces
+        # ------------------------------------------------------------------
+        D = nu / dx   # diffusion coefficient (same in x)
+        Dn = nu / dy
+
+        # Interior ux block: shape (ny-2, nx-1), rows j=1..ny-2, cols ii=0..nx-2
+        # u_c = ux[1:-1, 1:-1]  (already = ux_int but through ux tensor for grad)
+        u_c = ux[1:-1, 1:-1]    # (ny-2, nx-1)
+
+        # East face velocity (for Pe number): average of u_c and east neighbor
+        # East neighbor: for col ii → ux[j, ii+2] = ux[1:-1, 2:]  (shape ny-2, nx-2)
+        # At the right wall (ii=nx-2): east neighbor is the outlet face ux[:, nx]
+        ux_e_nb = torch.cat([ux[1:-1, 2:-1], ux[1:-1, -1:]], dim=1)  # (ny-2, nx-1)
+        u_e_face = 0.5 * (ux_e_nb + u_c)
+
+        # West face velocity: ux[1:-1, 0:-2+1] = ux[1:-1, :-1]  includes col 0 (inlet)
+        # West of col ii=0 is inlet face ux[j,0]=theta; west of col ii→ux[j,ii]
+        u_w_face = 0.5 * (ux[1:-1, :-2] + u_c)   # (ny-2, nx-1): ux[j,ii] + u_c
+
+        # v at x-face: bilinear average of 4 surrounding y-face values
+        # uy has shape (ny+1, nx); interior ux rows are j=1..ny-2
+        # SW = uy[j, ii], SE = uy[j, ii+1], NW = uy[j+1, ii], NE = uy[j+1, ii+1]
+        # Array: j=1..ny-2 → uy[1:-2, :]; j+1=2..ny-1 → uy[2:-1, :]
+        v_sw = uy[1:-2, :-1]    # uy[j,   ii]     (ny-2, nx-1)
+        v_se = uy[1:-2, 1:]     # uy[j,   ii+1]   (ny-2, nx-1)
+        v_nw = uy[2:-1, :-1]    # uy[j+1, ii]     (ny-2, nx-1)
+        v_ne = uy[2:-1, 1:]     # uy[j+1, ii+1]   (ny-2, nx-1)
+        v_c = 0.25 * (v_sw + v_se + v_nw + v_ne)
+
+        F_e = u_e_face
+        F_w = u_w_face
+        F_n = v_c
+        F_s = v_c
+
+        def h(F, D_val):
+            D_t = torch.as_tensor(D_val, dtype=F.dtype, device=F.device)
+            return torch.clamp(D_t - 0.5 * torch.abs(F), min=0.0) + torch.clamp(-F, min=0.0)
+
+        a_e_full = h(F_e, D)    # (ny-2, nx-1)
+        a_w_full = h(-F_w, D)   # (ny-2, nx-1)
+        a_n_full = h(F_n, Dn)   # (ny-2, nx-1)
+        a_s_full = h(-F_s, Dn)  # (ny-2, nx-1)
+
+        # Neumann outlet: zero east coefficient for rightmost interior col (ii=nx-2)
+        a_e_full = a_e_full.clone()
+        a_e_full[:, -1] = 0.0
+        # East: col ii=nx-2 has no east interior neighbor → zero contribution in matrix
+        mask_e = torch.ones(nx - 1, dtype=torch.bool, device=dev)
+        mask_e[-1] = False   # rightmost interior col: no east interior neighbor
+        mask_w = torch.ones(nx - 1, dtype=torch.bool, device=dev)
+        mask_w[0] = False    # leftmost interior col: no west interior neighbor (inlet BC source)
+
+        # Brinkman face value
+        bk_face = 0.5 * (brinkman[1:-1, :-1] + brinkman[1:-1, 1:])   # (ny-2, nx-1)
+
+        # North/south boundary handling:
+        # Row j=ny-2 (j_int=ny-3): north neighbor is top wall (row ny-1) → BC source, no matrix entry
+        # Row j=1 (j_int=0):       south neighbor is bottom wall (row 0) → BC source (0), no matrix entry
+        # Interior rows: a_n and a_s go into neighbor terms
+
+        # Boundary wall velocities
+        u_north_wall = theta if case == "cavity" else torch.zeros(1, device=dev, dtype=dt).squeeze()
+        u_south_wall = torch.zeros(1, device=dev, dtype=dt).squeeze()
+
+        # North boundary contribution (row j=ny-2, i.e. last row of u_c):
+        # a_n_val * u_north_wall → source
+        a_n_bc = a_n_full[-1:, :]     # (1, nx-1): BC row
+        src_n_bc = (a_n_bc * u_north_wall).unsqueeze(0)  # → added to RHS for last row
+
+        # South boundary contribution (row j=1, i.e. first row of u_c):
+        a_s_bc = a_s_full[:1, :]      # (1, nx-1): BC row
+        src_s_bc = (a_s_bc * u_south_wall).unsqueeze(0)
+
+        # West boundary (inlet) contribution (col ii=0):
+        # a_w * inlet_velocity → source for leftmost interior col
+        # inlet_velocity = theta for channel, 0 for cavity
+        if case == "channel":
+            inlet_val = theta
+        else:
+            inlet_val = torch.zeros(1, device=dev, dtype=dt).squeeze()
+        a_w_bc = a_w_full[:, :1]   # (ny-2, 1)
+        src_w_bc = a_w_bc * inlet_val  # (ny-2, 1)
+
+        # Build a_P0 (sum of all neighbor coefficients, incl. BC ones):
+        a_P0_u = a_e_full + a_w_full + a_n_full + a_s_full + bk_face   # (ny-2, nx-1)
+
+        # Residual = a_P0 * u_c  -  sum(a_nb * u_nb)  -  dp/dx  -  bc_sources
+        # Neighbor contributions (interior only, mask out boundary cols):
+        nb_e = torch.zeros_like(u_c)
+        nb_e[:, :-1] = a_e_full[:, :-1] * u_c[:, 1:]   # east: u[j, ii+2] = u_c shifted
+
+        nb_w = torch.zeros_like(u_c)
+        nb_w[:, 1:] = a_w_full[:, 1:] * u_c[:, :-1]    # west: u[j, ii] = u_c shifted
+
+        nb_n = torch.zeros_like(u_c)
+        nb_n[:-1, :] = a_n_full[:-1, :] * u_c[1:, :]   # north: u[j+1, ...]
+
+        nb_s = torch.zeros_like(u_c)
+        nb_s[1:, :] = a_s_full[1:, :] * u_c[:-1, :]    # south: u[j-1, ...]
+
+        # Pressure gradient (using converged p, treated as constant)
+        # Momentum source = (p_w - p_e) * dy / dx (area-weighted, divided by dx)
+        dp_dx = (p[1:-1, 1:] - p[1:-1, :-1]) / dx   # (ny-2, nx-1): p[j,ii+1]-p[j,ii]
+
+        R_ux = a_P0_u * u_c - nb_e - nb_w - nb_n - nb_s - (-dp_dx * dy)
+        # Subtract BC source contributions (already removed from matrix side)
+        # For north BC row: a_n_bc * u_north_wall was added to RHS in solve; in residual it's on LHS side
+        R_ux[-1:, :] -= a_n_bc * u_north_wall
+        R_ux[:1, :]  -= a_s_bc * u_south_wall
+        R_ux[:, :1]  -= src_w_bc    # inlet BC: a_w contribution
+
+        # ------------------------------------------------------------------
+        # v-momentum residual for interior uy faces: j=1..ny-1 (all nx cols)
+        # ------------------------------------------------------------------
+        Dx = nu / dx
+        Dy = nu / dy
+
+        v_c = uy[1:-1, :]    # (ny-1, nx): interior uy = uy_int
+
+        # North face: uy[j+1, i] — for j=ny-1 (top interior face), j+1=ny is the wall
+        uy_n_nb = torch.cat([uy[2:-1, :], torch.zeros(1, nx, device=dev, dtype=dt)], dim=0)  # (ny-1, nx)
+        v_n_face = 0.5 * (uy_n_nb + v_c)  # but top wall is 0, already in zeros
+
+        uy_s_nb = torch.cat([torch.zeros(1, nx, device=dev, dtype=dt), uy[1:-2, :]], dim=0)  # (ny-1, nx)
+        v_s_face = 0.5 * (uy_s_nb + v_c)
+
+        # u at y-face: bilinear average of surrounding x-face values
+        # u_sw[j,i] = ux[j, i], u_se = ux[j, i+1], u_nw = ux[j+1, i], u_ne = ux[j+1, i+1]
+        # uy interior rows 1..ny-1 → ux rows j-1 and j = rows 0..ny-2 and 1..ny-1
+        # In array coords: row jj (0-indexed interior) → physical j = jj+1
+        # ux rows for j-1 = 0..ny-2 → ux[:-1, :], for j = 1..ny-1 → ux[1:, :]
+        u_sw = ux[:-1, :-1]    # ux[j-1, i]   (ny-1, nx)
+        u_se = ux[:-1, 1:]     # ux[j-1, i+1] (ny-1, nx)
+        u_nw = ux[1:, :-1]     # ux[j,   i]   (ny-1, nx)
+        u_ne = ux[1:, 1:]      # ux[j,   i+1] (ny-1, nx)
+        u_c_v = 0.25 * (u_sw + u_se + u_nw + u_ne)
+
+        # v-momentum fluxes
+        # North: top interior face (jj=ny-2) has no north neighbor (wall uy=0)
+        F_vn = torch.where(
+            torch.arange(ny - 1, device=dev).unsqueeze(1) < ny - 2,
+            v_n_face, torch.zeros_like(v_n_face)
+        )
+        F_vs = v_s_face
+        # East/West: lateral walls have uy=0 (for cavity/channel both)
+        F_ve_all = u_c_v
+        F_vw_all = u_c_v
+
+        D_vn = torch.where(
+            torch.arange(ny - 1, device=dev).unsqueeze(1) < ny - 2,
+            torch.full((1,), Dy, device=dev, dtype=dt),
+            torch.zeros((1,), device=dev, dtype=dt)
+        )
+        D_vs = torch.full((ny - 1, nx), Dy, device=dev, dtype=dt)
+
+        a_vn_full = torch.where(
+            torch.arange(ny - 1, device=dev).unsqueeze(1) < ny - 2,
+            h(F_vn, Dy), torch.zeros(1, device=dev, dtype=dt)
+        )
+        a_vs_full = torch.where(
+            torch.arange(ny - 1, device=dev).unsqueeze(1) > 0,
+            h(-F_vs, Dy), torch.zeros(1, device=dev, dtype=dt)
+        )
+        a_ve_full = torch.where(
+            torch.arange(nx, device=dev).unsqueeze(0) < nx - 1,
+            h(F_ve_all, Dx), torch.zeros(1, device=dev, dtype=dt)
+        )
+        a_vw_full = torch.where(
+            torch.arange(nx, device=dev).unsqueeze(0) > 0,
+            h(-F_vw_all, Dx), torch.zeros(1, device=dev, dtype=dt)
+        )
+
+        bk_v = 0.5 * (brinkman[:-1, :] + brinkman[1:, :])   # (ny-1, nx): average over j-1, j
+
+        a_P0_v = a_vn_full + a_vs_full + a_ve_full + a_vw_full + bk_v
+
+        # v-neighbor contributions
+        nb_vn = torch.zeros_like(v_c)
+        nb_vn[:-1, :] = a_vn_full[:-1, :] * v_c[1:, :]
+
+        nb_vs = torch.zeros_like(v_c)
+        nb_vs[1:, :] = a_vs_full[1:, :] * v_c[:-1, :]
+
+        nb_ve = torch.zeros_like(v_c)
+        nb_ve[:, :-1] = a_ve_full[:, :-1] * v_c[:, 1:]
+
+        nb_vw = torch.zeros_like(v_c)
+        nb_vw[:, 1:] = a_vw_full[:, 1:] * v_c[:, :-1]
+
+        # Pressure gradient for v: (p[j,i] - p[j-1,i]) * dx / dy (area-weighted)
+        dp_dy = (p[1:, :] - p[:-1, :]) / dy    # (ny-1, nx): p[j,i] - p[j-1,i]
+
+        R_uy = a_P0_v * v_c - nb_vn - nb_vs - nb_ve - nb_vw - (-dp_dy * dx)
+
+        return torch.cat([R_ux.flatten(), R_uy.flatten()])
+
+    def _combined_residual(
+        self,
+        z: "Tensor",
+        theta: "Tensor",
+        n_u: int,
+        case: str,
+        brinkman: "Tensor | None" = None,
+    ) -> "Tensor":
+        """Combined (u, p) residual for implicit differentiation.
+
+        z = cat([u_flat, p_flat]) where u_flat is packed interior velocity and
+        p_flat = p.flatten().  Returns cat([R_u(u,p,theta), div(u)]) with
+        a pressure gauge pin at the outlet-center cell.
+
+        Used in _SteadyStateNS.backward to handle pressure-velocity coupling
+        in the fixed-point implicit differentiation.
+        """
+        nx, ny = self.nx, self.ny
+        dx, dy = self.mesh.dx, self.mesh.dy
+        dev = z.device
+        dt = z.dtype
+
+        u_flat = z[:n_u]
+        p_flat = z[n_u:]
+        p_2d = p_flat.reshape(ny, nx)
+
+        R_u = self._residual_flat(u_flat, theta, p_2d, case, brinkman)
+
+        # Reconstruct full ux/uy to compute divergence
+        ux_int, uy_int = self._unpack_interior(u_flat)
+        ux = torch.zeros(ny, nx + 1, device=dev, dtype=dt)
+        uy = torch.zeros(ny + 1, nx, device=dev, dtype=dt)
+        ux[1:-1, 1:-1] = ux_int
+        uy[1:-1, :] = uy_int
+
+        if case == "channel":
+            ux[1:-1, 0] = theta   # inlet only for interior rows (walls stay 0)
+            ux[:, -1] = ux[:, -2]  # Neumann outlet
+        elif case == "cavity":
+            ux[-1, :] = theta
+            uy[:, 0] = 0.0
+            uy[:, -1] = 0.0
+
+        # Divergence: (ux[j,i+1]-ux[j,i])/dx + (uy[j+1,i]-uy[j,i])/dy
+        div = (ux[:, 1:] - ux[:, :-1]) / dx + (uy[1:, :] - uy[:-1, :]) / dy  # (ny, nx)
+        R_p = div.flatten()
+
+        # Pin pressure gauge at outlet-center cell to remove null space
+        pin_cell = (ny // 2) * nx + (nx - 1)
+        R_p = R_p.clone()
+        R_p[pin_cell] = p_flat[pin_cell]
+
+        return torch.cat([R_u, R_p])
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -216,7 +661,7 @@ def _solve_u(
 
     rows, cols, vals = [], [], []
     b = np.zeros(nu_int, dtype=np.float64)
-    a_P_arr = np.ones((ny, nx - 1), dtype=np.float64)  # default 1 for BC rows
+    a_P_arr = np.full((ny, nx - 1), 1e30, dtype=np.float64)  # large → 1/a_P≈0 for BC rows
 
     def I(j_int, i_int):
         # j_int in [0, ny-3] → physical j = j_int + 1
@@ -254,8 +699,23 @@ def _solve_u(
             D_n = nu / dy
             D_s = nu / dy
 
-            a_e = hybrid( F_e, D_e) if ii + 1 < nx - 1 else 0.0
-            a_w = hybrid(-F_w, D_w) if ii - 1 >= 0       else 0.0
+            # East: if at the right boundary, Neumann outlet → zero coefficient, no source
+            if ii + 1 >= nx - 1:
+                a_e_val = 0.0; a_e_matrix = 0.0; src_e = 0.0
+            else:
+                a_e_val = hybrid(F_e, D_e); a_e_matrix = a_e_val; src_e = 0.0
+
+            # West: if at the left boundary, Dirichlet inlet BC source
+            a_w_val = hybrid(-F_w, D_w)
+            if ii == 0:
+                u_inlet_val = float(inlet_velocity) if isinstance(inlet_velocity, (int, float)) \
+                              else inlet_velocity.item()
+                src_w = a_w_val * (u_inlet_val if case == "channel" else 0.0)
+                a_w_matrix = 0.0
+            else:
+                src_w = 0.0
+                a_w_matrix = a_w_val
+
             # North: if j+1 is the lid row (j == ny-2) → Dirichlet BC source, no matrix entry
             # Otherwise: interior row → matrix entry
             if j + 1 == ny - 1:    # next row is boundary (top wall)
@@ -281,21 +741,21 @@ def _solve_u(
                 a_s_val = 0.0; src_s = 0.0; a_s_matrix = 0.0
 
             bk_face = 0.5 * (bk_np[j, ii] + bk_np[j, ii + 1])
-            a_P0 = a_e + a_w + a_n_val + a_s_val + bk_face
+            a_P0 = a_e_val + a_w_val + a_n_val + a_s_val + bk_face
             a_P  = a_P0 / alpha_u
 
-            src = -(p_np[j, ii + 1] - p_np[j, ii]) / dx
+            src = -(p_np[j, ii + 1] - p_np[j, ii]) * dy / dx
             src += (1.0 - alpha_u) / alpha_u * a_P0 * u_c
-            src += src_n + src_s
+            src += src_n + src_s + src_w + src_e
 
             b[k] = src
             a_P_arr[j, ii] = a_P
 
             rows.append(k); cols.append(k); vals.append(a_P)
-            if ii + 1 < nx - 1:
-                rows.append(k); cols.append(I(j_int, ii + 1)); vals.append(-a_e)
-            if ii - 1 >= 0:
-                rows.append(k); cols.append(I(j_int, ii - 1)); vals.append(-a_w)
+            if a_e_matrix > 0.0:
+                rows.append(k); cols.append(I(j_int, ii + 1)); vals.append(-a_e_matrix)
+            if a_w_matrix > 0.0:
+                rows.append(k); cols.append(I(j_int, ii - 1)); vals.append(-a_w_matrix)
             if a_n_matrix > 0.0:
                 rows.append(k); cols.append(I(j_int + 1, ii)); vals.append(-a_n_matrix)
             if a_s_matrix > 0.0:
@@ -344,7 +804,7 @@ def _solve_v(
             k = I(jj, i)
             v_c = uy_np[j, i]
 
-            v_n_face = 0.5 * (uy_np[j + 1, i] if j + 1 <= ny else 0.0) + 0.5 * v_c
+            v_n_face = 0.5 * (uy_np[j + 1, i] if j + 1 <= ny - 1 else 0.0) + 0.5 * v_c
             v_s_face = 0.5 * uy_np[j - 1, i] + 0.5 * v_c
 
             # u at this y-face (bilinear average)
@@ -377,7 +837,7 @@ def _solve_v(
             a_P0 = a_n + a_s + a_e + a_w + bk_face
             a_P  = a_P0 / alpha_u
 
-            src = -(p_np[j, i] - p_np[j - 1, i]) / dy
+            src = -(p_np[j, i] - p_np[j - 1, i]) * dx / dy
             src += (1.0 - alpha_u) / alpha_u * a_P0 * v_c
 
             b[k] = src
@@ -420,7 +880,9 @@ def _build_pressure_system(
     a_uy_np = a_uy.detach().numpy()   # (ny-1, nx)
 
     n = nx * ny
-    pin_idx = 0
+    # Pin at a cell in the top-right region (away from inlet/corners)
+    # to remove the rank-1 null space
+    pin_idx = (ny // 2) * nx + (nx - 1)
     rows, cols, vals = [], [], []
 
     for j in range(ny):
@@ -434,22 +896,22 @@ def _build_pressure_system(
 
             # East face: x-face at column i+1 (interior x-face ii=i, physical col i+1)
             if i + 1 < nx:
-                c_e = 1.0 / (a_ux_np[j, i] * dx ** 2 + 1e-30)
+                c_e = dy / (a_ux_np[j, i] * dx ** 2 + 1e-30)
                 rows.append(k); cols.append(k + 1); vals.append(-c_e)
                 d += c_e
             # West face: x-face at column i (interior x-face ii=i-1)
             if i - 1 >= 0:
-                c_w = 1.0 / (a_ux_np[j, i - 1] * dx ** 2 + 1e-30)
+                c_w = dy / (a_ux_np[j, i - 1] * dx ** 2 + 1e-30)
                 rows.append(k); cols.append(k - 1); vals.append(-c_w)
                 d += c_w
             # North face: y-face at row j+1 (interior y-face jj=j)
             if j + 1 < ny:
-                c_n = 1.0 / (a_uy_np[j, i] * dy ** 2 + 1e-30)
+                c_n = dx / (a_uy_np[j, i] * dy ** 2 + 1e-30)
                 rows.append(k); cols.append(k + nx); vals.append(-c_n)
                 d += c_n
             # South face: y-face at row j (interior y-face jj=j-1)
             if j - 1 >= 0:
-                c_s = 1.0 / (a_uy_np[j - 1, i] * dy ** 2 + 1e-30)
+                c_s = dx / (a_uy_np[j - 1, i] * dy ** 2 + 1e-30)
                 rows.append(k); cols.append(k - nx); vals.append(-c_s)
                 d += c_s
 
@@ -476,17 +938,18 @@ def _divergence(ux: Tensor, uy: Tensor, dx: float, dy: float) -> Tensor:
     return (ux[:, 1:] - ux[:, :-1]) / dx + (uy[1:, :] - uy[:-1, :]) / dy
 
 
-def _vcorr_x(p_prime: Tensor, a_ux: Tensor, dx: float, nx: int, ny: int) -> Tensor:
-    """u-velocity correction: Δu = (1/a_P) * (dp'/dx) at interior x-faces."""
+def _vcorr_x(p_prime: Tensor, a_ux: Tensor, dx: float, dy: float, nx: int, ny: int) -> Tensor:
+    """u-velocity correction: Δu = (dy/dx) * (dp'/dx) / a_P at interior x-faces."""
     out = torch.zeros(ny, nx + 1, device=p_prime.device, dtype=p_prime.dtype)
     dp = (p_prime[:, 1:nx] - p_prime[:, 0:nx-1]) / dx   # (ny, nx-1)
-    out[:, 1:nx] = dp / a_ux.clamp(min=1e-10)
+    out[:, 1:nx] = dp * dy / a_ux.clamp(min=1e-10)
     return out
 
 
-def _vcorr_y(p_prime: Tensor, a_uy: Tensor, dy: float, nx: int, ny: int) -> Tensor:
-    """v-velocity correction: Δv = (1/a_P) * (dp'/dy) at interior y-faces."""
+def _vcorr_y(p_prime: Tensor, a_uy: Tensor, dx: float, dy: float, nx: int, ny: int) -> Tensor:
+    """v-velocity correction: Δv = (dx/dy) * (dp'/dy) / a_P at interior y-faces."""
     out = torch.zeros(ny + 1, nx, device=p_prime.device, dtype=p_prime.dtype)
+    # Only correct interior y-faces (rows 1..ny-1)
     dp = (p_prime[1:ny, :] - p_prime[0:ny-1, :]) / dy   # (ny-1, nx)
-    out[1:ny, :] = dp / a_uy.clamp(min=1e-10)
+    out[1:ny, :] = dp * dx / a_uy.clamp(min=1e-10)
     return out
