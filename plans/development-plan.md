@@ -2,16 +2,53 @@
 
 **Status:** Pre-implementation planning
 **Created:** 2026-05-23
-**Patent strategy:** China first-filing before any core algorithm push
+**Patent strategy:** China first-filing, then PCT, then public push
+
+---
+
+## Strategic Context (read this first)
+
+DiffCFD sits inside a two-project portfolio decision the author made on 2026-05-23, after a comparative analysis of three candidate projects (DiffCFD, DiffNano, OpenLithoHub). The conclusion that frames everything below:
+
+- **OpenLithoHub** (computational lithography, GitHub-public 2026-05) is in **damage-control mode**: CN/EP novelty is already lost because GitHub self-publication is not covered by China Patent Law Art. 24 or by EPO grace period; surviving routes are US 35 USC §102(b)(1) (12-month inventor self-disclosure grace), JP/KR (12-month), and TW (12-month). The action there is a US Provisional filing within ~51 weeks of the first relevant commit, run by patent counsel — no further code work required.
+- **DiffNano** (differentiable EM with cross-domain DFM coupling) was **dropped**: requires multi-GPU 3D FDTD experiments to produce CN-filing embodiments; the author has only a single CPU laptop. The defensible claim space (C4 + C5) also shrank to two pillars after TORCWA / TorchRDIT / FDTDX / tidy3d.plugins.autograd / meent prior-art review.
+- **DiffCFD** is the **prime focus**: 2D incompressible NS at 64²–128² runs on a CPU laptop without GPU, the patent corpus is still untouched (no public code), and four claim pillars (C1 + C2 + C3 + C4) survive freedom-to-operate analysis.
+
+**One-line summary**: OpenLithoHub is a hold-the-line operation handled by counsel; DiffCFD is where new engineering effort goes.
+
+### Resource constraints driving the plan
+
+- **Single contributor**, evening-time pace (~10–20 hours/week realistic)
+- **CPU only** — no local GPU, no cloud GPU budget assumed; HuggingFace free tier is not adequate for sustained training runs
+- **No team** for parallel benchmarking, validation, or documentation
+- All milestone timelines below have been re-scaled from the original full-time estimates
+
+The original DiffCFD plan estimated v0.05 in "3-4 weeks" and v0.1 in "2-3 months" — those numbers assumed full-time engineering. Re-scaled to part-time: **v0.05 ≈ 8–12 weeks, v0.1 ≈ 14–20 weeks after v0.05**, total wall-clock to CN-filing-ready ≈ **22–32 weeks**.
+
+### EP-preserving release sequence (revised — replaces "push after 申请号" rule)
+
+The original plan said "push to public GitHub after CN 申请号 + 申请日 confirmation." That rule is **insufficient** — it preserves CN priority but **destroys EP novelty**, because EPO has no self-disclosure grace period and a public push between CN filing and PCT filing makes the inventor's own code prior art against the EP national-stage entry.
+
+**Revised release sequence:**
+
+1. Implement v0.05 + v0.1 locally on `dev/*` branches; **`main` stays code-empty**
+2. Submit CN invention patent application; receive **申请号 + 申请日 written confirmation** (not 受理通知书)
+3. **File PCT international application within 12 months** of CN priority date, using CN as the Paris Convention priority base
+4. **Only after PCT submission is confirmed** push solver code publicly to `main`
+5. Continue PCT national-stage entries (US, JP, KR, TW, EP) at 30–31 months from CN priority
+
+The CN→PCT→push order preserves EP novelty for the duration of the PCT-stage 30-month window. If the public push happens between step 2 and step 3, EP rights are lost permanently.
+
+This rule applies to **all** code that embodies any of C1–C4. Domain-agnostic supporting code (validation harness, VTK export, geometry parameterization without claim-bearing solver internals) can release earlier under a separate review.
 
 ---
 
 ## Patent Strategy
 
-1. Implement core algorithms locally (do NOT push until CN filing)
+1. Implement core algorithms locally (do NOT push until **PCT** filing — see "EP-preserving release sequence" above)
 2. Submit China invention patent application — this establishes the **申请日 (filing date)**
-3. **Open-source gate: push ONLY after receiving 申请号 + 申请日 confirmation** (NOT after 受理通知书, which arrives days/weeks after filing and is a formality check, not the priority date anchor)
-4. File PCT within 12 months using CN filing date as priority base
+3. Receive **申请号 + 申请日 written confirmation** (NOT 受理通知书, which arrives days/weeks after filing and is a formality check, not the priority date anchor)
+4. File PCT within 12 months using CN filing date as priority base — **only after PCT is on file may the code be pushed publicly**, otherwise EP novelty is destroyed
 
 **Legal basis for the open-source gate (must not be misunderstood):**
 China Patent Law Art. 24 grace period covers ONLY four narrow categories: (1) state-of-emergency first public disclosure for public interest, (2) first display at a government-recognized international exhibition, (3) first publication at a designated academic/technical conference, (4) unauthorized disclosure by a third party without the inventor's consent. **GitHub open-source push falls into NONE of these categories.** A pre-filing GitHub push permanently destroys novelty in China with zero grace period available. There is no rescue path.
@@ -22,7 +59,7 @@ China Patent Law Art. 24 grace period covers ONLY four narrow categories: (1) st
 - CN首申只覆盖v0.1已验证的**C1**（稳态隐式微分+Poiseuille解析梯度验证作为实施例）
 - C2在C1申请提交后单独申请（需要v0.3 cylinder wake基准作为实施例）
 - C3/C4各自单独申请，等对应milestone完成后提交
-- **开源时机**：收到**申请号 + 申请日确认**后push（不是受理通知书——受理通知书是形式审查回执，晚于申请日数天到数周，不是优先权锚点）
+- **开源时机**：**等到 PCT 提交确认后**再 push（不是 CN 申请号确认那一刻）。CN 申请号锁定的是 CN 优先权和 PCT 优先权基础；EP 没有自主公开宽限期，CN 提交后到 PCT 提交前的窗口期 push 会让自己的 GitHub 代码成为 EP 端的现有技术。受理通知书是形式审查回执，不是 PCT 触发条件。
 
 **Do NOT push the following until CN filing:**
 - `diffcfd/solvers/navier_stokes.py` — implicit differentiation through SIMPLE (core claim)
@@ -130,13 +167,13 @@ The combination "differentiable solver + standard gymnasium" does NOT exist in H
 - C2无宽限期退路：即便自己先开源C2实现，中国也无法靠宽限期补救（理由同上，GitHub公开不属于Art.24四类情形）。这进一步强化"C1+C2合并首申、不可拖延"的结论
 - C1+C2共用同一个实施例（cylinder wake：C1提供解析梯度，C2提供gymnasium接口）
 - C3/C4仍分案申请
-- **开源时机**：收到**申请号 + 申请日确认**后push（不是受理通知书——受理通知书是形式审查回执，晚于申请日数天到数周，不是优先权锚点）
+- **开源时机**：**等到 PCT 提交确认后**再 push（不是 CN 申请号确认那一刻）。CN 申请号锁定的是 CN 优先权和 PCT 优先权基础；EP 没有自主公开宽限期，CN 提交后到 PCT 提交前的窗口期 push 会让自己的 GitHub 代码成为 EP 端的现有技术。受理通知书是形式审查回执，不是 PCT 触发条件。
 
 ---
 
 ## v0.05 Internal Milestone — Unrolled SIMPLE (Risk Gate, Not Released)
 
-**Target:** 3-4 weeks | **Internal only — validates physics before implicit diff**
+**Target:** 8-12 weeks part-time (single contributor, evenings) | **Internal only — validates physics before implicit diff**
 
 This phase is not a public release. It de-risks v0.1 by separating two problems:
 (a) correctness of the forward NS solver and boundary conditions
@@ -153,7 +190,7 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
 
 ## v0.1 Milestone — 2D Incompressible NS + Steady-State Implicit Diff
 
-**Target:** 2-3 months after v0.05 | **Gate for CN patent filing**
+**Target:** 14-20 weeks part-time after v0.05 | **Gate for CN patent filing**
 
 ### Core deliverables
 
