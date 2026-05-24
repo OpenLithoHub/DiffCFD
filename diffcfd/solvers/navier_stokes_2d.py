@@ -155,6 +155,7 @@ class NavierStokes2D:
         tol: float = 1e-5,
         lx: float = 1.0,
         ly: float = 1.0,
+        anderson_depth: int = 0,
     ) -> None:
         self.re = reynolds_number
         self.nx, self.ny = grid
@@ -164,6 +165,7 @@ class NavierStokes2D:
         self.alpha_p = alpha_p
         self.max_iter = max_iter
         self.tol = tol
+        self.anderson_depth = anderson_depth
         self.mesh = CartesianMesh(self.nx, self.ny, lx=lx, ly=ly, device=device)
         self.bc = BoundaryConditions(self.mesh)
         self._nu = 1.0 / reynolds_number
@@ -239,7 +241,12 @@ class NavierStokes2D:
         p  = torch.zeros(ny, nx, device=dev)
         ux, uy, p = self._apply_bcs(ux, uy, p, inlet_velocity, lid_velocity, case)
 
-        for _ in range(self.max_iter):
+        # Anderson acceleration state
+        m = self.anderson_depth
+        hist_x = []  # previous iterates (flattened ux+uy+p)
+        hist_g = []  # previous residuals (g_k = x_k - x_{k-1})
+
+        for it in range(self.max_iter):
             ux_old, uy_old, p_old = ux, uy, p
 
             # Step 1: implicit momentum solve
@@ -282,6 +289,33 @@ class NavierStokes2D:
             ux, uy, p = ux_new, uy_new, p_new
             if res < self.tol:
                 break
+
+            # Anderson acceleration (forward-only, does not affect implicit diff)
+            if m > 0:
+                x_k = torch.cat([ux.flatten(), uy.flatten(), p.flatten()]).detach()
+                if it > 0:
+                    g_k = x_k - hist_x[-1]
+                    hist_g.append(g_k)
+                    if len(hist_g) > m:
+                        hist_g.pop(0)
+                        hist_x.pop(0)
+                    if len(hist_g) >= 2:
+                        # Solve least-squares for Anderson coefficients
+                        G = torch.stack(list(hist_g), dim=1)  # (N, m_used)
+                        try:
+                            coeffs = torch.linalg.lstsq(G, g_k).solution
+                            # Anderson extrapolation
+                            X_hist = torch.stack(list(hist_x), dim=1)
+                            x_new = x_k - (X_hist - torch.stack(list(hist_x), dim=1)) @ coeffs
+                            # Unpack
+                            n_ux = (ny) * (nx + 1)
+                            n_uy = (ny + 1) * nx
+                            ux = x_new[:n_ux].reshape(ny, nx + 1)
+                            uy = x_new[n_ux:n_ux + n_uy].reshape(ny + 1, nx)
+                            p = x_new[n_ux + n_uy:].reshape(ny, nx)
+                        except Exception:
+                            pass  # Fall back to standard iteration
+                hist_x.append(x_k)
 
         if return_aP:
             return ux, uy, p, a_ux, a_uy
