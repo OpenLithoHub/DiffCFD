@@ -195,6 +195,7 @@ class NavierStokes2D:
         inlet_velocity: float | Tensor = 1.0,
         lid_velocity: float | Tensor = 0.0,
         case: str = "channel",
+        buoyancy_src: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor]:
         """Run SIMPLE to steady state.
 
@@ -221,7 +222,10 @@ class NavierStokes2D:
                 )
             return _SteadyStateNS.apply(theta, self, case, sdf)
         else:
-            return self._run_simple(sdf, inlet_velocity, lid_velocity, case)
+            return self._run_simple(
+                sdf, inlet_velocity, lid_velocity, case,
+                buoyancy_src=buoyancy_src,
+            )
 
     def _run_simple(
         self,
@@ -230,6 +234,7 @@ class NavierStokes2D:
         lid_velocity: float | Tensor = 0.0,
         case: str = "channel",
         return_aP: bool = False,
+        buoyancy_src: Tensor | None = None,
     ) -> tuple:
         """Core SIMPLE iteration loop.
 
@@ -271,7 +276,7 @@ class NavierStokes2D:
             )
             uy_star, a_uy = _solve_v(
                 ux, uy, p, nu, dx, dy, self.alpha_u, brinkman, nx, ny,
-                inlet_velocity, lid_velocity, case
+                inlet_velocity, lid_velocity, case, buoyancy_src=buoyancy_src
             )
 
             ux_star, uy_star, _ = self._apply_bcs(
@@ -311,28 +316,26 @@ class NavierStokes2D:
                 if it > 0:
                     g_k = x_k - hist_x[-1]
                     hist_g.append(g_k)
+                    hist_x.append(x_k)
                     if len(hist_g) > m:
                         hist_g.pop(0)
                         hist_x.pop(0)
                     if len(hist_g) >= 2:
                         G = torch.stack(list(hist_g), dim=1)  # (N, m_used)
                         try:
-                            # Solve min ||G gamma - g_k||^2 for Anderson coefficients
                             coeffs = torch.linalg.lstsq(G, g_k).solution  # (m_used,)
-                            # Anderson extrapolation: x_new = x_k - G @ coeffs + X_hist @ coeffs
-                            # which simplifies to: x_new = sum_i (gamma_i * x_i) + (1 - sum(gamma)) * x_k
-                            gamma_sum = coeffs.sum()
-                            X_hist = torch.stack(list(hist_x), dim=1)  # (N, m_used)
-                            x_new = x_k + (X_hist - x_k.unsqueeze(1)) @ coeffs
-                            # Unpack
-                            n_ux = ny * (nx + 1)
-                            n_uy = (ny + 1) * nx
-                            ux = x_new[:n_ux].reshape(ny, nx + 1)
-                            uy = x_new[n_ux:n_ux + n_uy].reshape(ny + 1, nx)
-                            p = x_new[n_ux + n_uy:].reshape(ny, nx)
-                        except Exception:
-                            pass
-                hist_x.append(x_k)
+                            if torch.isfinite(coeffs).all():
+                                X_hist = torch.stack(list(hist_x), dim=1)
+                                x_new = x_k + (X_hist - x_k.unsqueeze(1)) @ coeffs
+                                n_ux = ny * (nx + 1)
+                                n_uy = (ny + 1) * nx
+                                ux = x_new[:n_ux].reshape(ny, nx + 1)
+                                uy = x_new[n_ux:n_ux + n_uy].reshape(ny + 1, nx)
+                                p = x_new[n_ux + n_uy:].reshape(ny, nx)
+                        except RuntimeError:
+                            pass  # lstsq singular — skip this iteration
+                else:
+                    hist_x.append(x_k)
 
         if return_aP:
             return ux, uy, p, a_ux, a_uy
@@ -607,6 +610,16 @@ class NavierStokes2D:
 
         R_uy = a_P0_v * v_c - nb_vn - nb_vs - nb_ve - nb_vw - (-dp_dy * dx)
 
+        # Subtract BC source terms for v-momentum:
+        # North boundary (jj=ny-2, j=ny-1): wall uy=0 → a_vn * 0 = 0 (no effect, but include for generality)
+        # South boundary (jj=0, j=1): wall uy=0 → a_vs * 0 = 0
+        # East/West boundaries (cavity): wall uy=0 → a_ve/a_vw * 0 = 0
+        # For non-zero wall velocities these would contribute; with no-slip walls they are zero.
+        v_north_wall = torch.zeros(1, device=dev, dtype=dt).squeeze()
+        v_south_wall = torch.zeros(1, device=dev, dtype=dt).squeeze()
+        R_uy[-1:, :] -= a_vn_full[-1:, :] * v_north_wall
+        R_uy[:1, :]  -= a_vs_full[:1, :] * v_south_wall
+
         return torch.cat([R_ux.flatten(), R_uy.flatten()])
 
     def _combined_residual(
@@ -829,6 +842,7 @@ def _solve_v(
     nu: float, dx: float, dy: float, alpha_u: float,
     brinkman: Tensor, nx: int, ny: int,
     inlet_velocity, lid_velocity, case: str,
+    buoyancy_src: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Build and solve the implicit v-momentum equation.
 
@@ -839,6 +853,7 @@ def _solve_v(
     uy_np = uy.detach().numpy()
     p_np  = p.detach().numpy()
     bk_np = brinkman.detach().numpy()
+    buoy_np = buoyancy_src.detach().numpy() if buoyancy_src is not None else None
 
     nv_int = (ny - 1) * nx
 
@@ -890,6 +905,8 @@ def _solve_v(
 
             src = -(p_np[j, i] - p_np[j - 1, i]) * dx / dy
             src += (1.0 - alpha_u) / alpha_u * a_P0 * v_c
+            if buoy_np is not None:
+                src += buoy_np[j, i] * dx * dy
 
             b[k] = src
             a_P_arr[k] = a_P
