@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "diffcfd"
-version = "0.4.1"
+version = "0.6.0"
 description = "Differentiable Computational Fluid Dynamics for Steady-State Inverse Design and Reinforcement Learning"
 readme = "README.md"
 license = { text = "Apache-2.0" }
