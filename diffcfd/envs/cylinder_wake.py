@@ -147,44 +147,29 @@ class CylinderWakeEnv(DiffCFDEnv):
     ) -> tuple[Tensor, Tensor, bool, dict]:
         self._step_count += 1
 
-        # Action controls inlet velocity perturbation + cylinder rotation effect
-        # Rotation rate α adds a Magnus-like lateral velocity perturbation
         rotation_rate = action[0] if isinstance(action, Tensor) and action.numel() > 0 else torch.tensor(0.0, device=self.device)
 
         u_inlet = torch.tensor(
             self.inlet_velocity, dtype=torch.float32, device=self.device
         ).requires_grad_(True)
 
+        # Compute body velocity field for rotating cylinder in Brinkman region
+        # ω = 2·α·U∞/D; body velocity at (x,y) = ω × r = (-ω·ry, ω·rx)
+        if rotation_rate.abs() > 1e-8:
+            omega = rotation_rate * 2.0 * self.inlet_velocity / (2 * self.cyl_r)
+            x, y = self.mesh.cell_centers()
+            rx = x - self.cyl_cx
+            ry = y - self.cyl_cy
+            u_body_x = (-omega * ry).detach()
+            u_body_y = (omega * rx).detach()
+        else:
+            u_body_x = None
+            u_body_y = None
+
         self._ux, self._uy, self._p = self._solver.solve_steady(
-            sdf=self._sdf, inlet_velocity=u_inlet, case="channel"
+            sdf=self._sdf, inlet_velocity=u_inlet, case="channel",
+            u_body_x=u_body_x, u_body_y=u_body_y,
         )
-
-        # Apply rotation effect as a velocity perturbation near the cylinder.
-        # Rotation adds tangential velocity on the cylinder surface.
-        # Modeled as a Magnus-like perturbation that decays with distance.
-        dx, dy = self.mesh.dx, self.mesh.dy
-        x, y = self.mesh.cell_centers()  # (ny, nx)
-        # Radial distance from cylinder center
-        rx = x - self.cyl_cx
-        ry = y - self.cyl_cy
-        r_dist = torch.sqrt(rx ** 2 + ry ** 2) + 1e-10
-        # Rotation rate: α = ω·D/(2·U∞) → ω = 2·α·U∞/D
-        omega = rotation_rate * 2.0 * self.inlet_velocity / (2 * self.cyl_r)
-        decay = torch.exp(-((r_dist - self.cyl_r) / (3 * self.cyl_r)) ** 2)
-        factor = decay * self.cyl_r ** 2 / (r_dist ** 2 + self.cyl_r ** 2)
-        rot_ux = -omega * ry * factor  # (ny, nx)
-        rot_uy = omega * rx * factor   # (ny, nx)
-
-        # Interpolate cell-center perturbation to face locations
-        # ux faces: (ny, nx+1), interior faces are [1:-1, 1:-1]
-        self._ux = self._ux.clone()
-        self._uy = self._uy.clone()
-        # x-face perturbation: average of neighboring cell-center values
-        rot_ux_face = 0.5 * (rot_ux[:, :-1] + rot_ux[:, 1:])  # (ny, nx-1)
-        self._ux[1:-1, 1:-1] += rot_ux_face[1:-1, :]
-        # y-face perturbation: average of neighboring cell-center values
-        rot_uy_face = 0.5 * (rot_uy[:-1, :] + rot_uy[1:, :])  # (ny-1, nx)
-        self._uy[1:-1, :] += rot_uy_face
 
         obs = self._build_obs()
         reward = self._compute_reward()
@@ -197,8 +182,8 @@ class CylinderWakeEnv(DiffCFDEnv):
         dx, dy = self.mesh.dx, self.mesh.dy
         probes = []
         for i in range(self.n_probes // 2):
-            ix = int(self.probe_x[i].item() / dx)
-            iy = int(self.probe_y[i].item() / dy)
+            ix = round(self.probe_x[i].item() / dx)
+            iy = round(self.probe_y[i].item() / dy)
             ix = min(max(ix, 0), self.nx - 1)
             iy = min(max(iy, 0), self.ny - 1)
             ux_val = 0.5 * (self._ux[iy, ix] + self._ux[iy, ix + 1])
@@ -207,18 +192,31 @@ class CylinderWakeEnv(DiffCFDEnv):
         return torch.stack(probes)
 
     def _compute_reward(self) -> Tensor:
-        """Reward = negative drag coefficient (minimize drag)."""
-        # Drag proxy: pressure difference across cylinder + viscous contribution
-        # Simplified: use pressure at cylinder front and back
-        ix_front = max(int((self.cyl_cx - self.cyl_r) / self.mesh.dx), 0)
-        ix_back = min(int((self.cyl_cx + self.cyl_r) / self.mesh.dx), self.nx - 1)
-        iy_cyl = min(int(self.cyl_cy / self.mesh.dy), self.ny - 1)
+        """Reward = negative drag coefficient (minimize drag).
 
-        p_front = self._p[iy_cyl, ix_front]
-        p_back = self._p[iy_cyl, ix_back]
-        drag_proxy = p_front - p_back
+        Integrates pressure force over the cylinder surface using the Brinkman
+        mask gradient as a surface normal proxy, plus a viscous drag estimate.
+        """
+        dx, dy = self.mesh.dx, self.mesh.dy
 
-        return -drag_proxy
+        # Pressure drag: integrate p * dmask/dx over the domain
+        chi = self._solver.mesh.sdf_to_mask(self._sdf, epsilon=1e-3)
+        dchi_dx = (chi[:, 1:] - chi[:, :-1]) / dx   # (ny, nx-1)
+
+        # Pressure at x-faces
+        p_face_x = 0.5 * (self._p[:, :-1] + self._p[:, 1:])  # (ny, nx-1)
+        pressure_drag = (p_face_x * dchi_dx * dy).sum()
+
+        # Viscous drag: du_x/dy at y-faces times mask gradient
+        # ux shape (ny, nx+1), du/dy at y-faces → (ny-1, nx+1)
+        dux_dy = (self._ux[1:, :] - self._ux[:-1, :]) / dy  # (ny-1, nx+1)
+        dchi_dy = (chi[1:, :] - chi[:-1, :]) / dy            # (ny-1, nx)
+        # Interpolate ux gradient to cell-center x-positions: (ny-1, nx)
+        dux_dy_cc = 0.5 * (dux_dy[:, :-1] + dux_dy[:, 1:])
+        viscous_drag = (1.0 / self.re) * (dux_dy_cc * dchi_dy * dx).sum()
+
+        drag = pressure_drag + viscous_drag
+        return -drag
 
     def _build_info(self) -> dict:
         return {

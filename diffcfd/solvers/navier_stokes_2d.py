@@ -202,11 +202,18 @@ class NavierStokes2D:
         lid_velocity: float | Tensor = 0.0,
         case: str = "channel",
         buoyancy_src: Tensor | None = None,
+        u_body_x: Tensor | None = None,
+        u_body_y: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor]:
         """Run SIMPLE to steady state.
 
         When backward="implicit_diff", wraps the SIMPLE forward pass with a
         custom autograd Function that uses matrix-free GMRES for the backward.
+
+        Args:
+            u_body_x, u_body_y: Body velocity field (ny, nx) for immersed boundary.
+                When set, Brinkman penalization becomes (u - u_body)/ε instead of u/ε,
+                enabling rotating body effects (Magnus effect, etc.).
 
         Returns: (ux, uy, p).
         """
@@ -231,6 +238,7 @@ class NavierStokes2D:
             return self._run_simple(
                 sdf, inlet_velocity, lid_velocity, case,
                 buoyancy_src=buoyancy_src,
+                u_body_x=u_body_x, u_body_y=u_body_y,
             )
 
     def _run_simple(
@@ -241,6 +249,8 @@ class NavierStokes2D:
         case: str = "channel",
         return_aP: bool = False,
         buoyancy_src: Tensor | None = None,
+        u_body_x: Tensor | None = None,
+        u_body_y: Tensor | None = None,
     ) -> tuple:
         """Core SIMPLE iteration loop.
 
@@ -279,12 +289,13 @@ class NavierStokes2D:
             # Step 1: implicit momentum solve
             ux_star, a_ux = _solve_u(
                 ux, uy, p, nu, dx, dy, self.alpha_u, brinkman, nx, ny,
-                inlet_velocity, lid_velocity, case, nu_field=nu_field
+                inlet_velocity, lid_velocity, case,
+                nu_field=nu_field, u_body=u_body_x
             )
             uy_star, a_uy = _solve_v(
                 ux, uy, p, nu, dx, dy, self.alpha_u, brinkman, nx, ny,
                 inlet_velocity, lid_velocity, case,
-                buoyancy_src=buoyancy_src, nu_field=nu_field
+                buoyancy_src=buoyancy_src, nu_field=nu_field, u_body=u_body_y
             )
 
             ux_star, uy_star, _ = self._apply_bcs(
@@ -722,21 +733,18 @@ def _solve_u(
     brinkman: Tensor, nx: int, ny: int,
     inlet_velocity, lid_velocity, case: str,
     nu_field: Tensor | None = None,
+    u_body: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Build and solve the implicit u-momentum equation.
 
-    Solves only interior y-rows (j = 1..ny-2); boundary rows are Dirichlet BCs
-    and are treated as source terms for adjacent rows.  Hybrid upwind
-    (Patankar 1980) for convection, central for diffusion.
-
     Returns (u_star, a_P_field) where a_P_field shape is (ny, nx-1).
-    Boundary rows of a_P_field are filled with 1.0 (unused by pressure system).
     """
     ux_np = ux.detach().numpy()
     uy_np = uy.detach().numpy()
     p_np  = p.detach().numpy()
     bk_np = brinkman.detach().numpy()
     nu_np = nu_field.detach().numpy() if nu_field is not None else nu
+    ubody_np = u_body.detach().numpy() if u_body is not None else None
 
     # Interior y-rows: j = 1..ny-2  (boundary rows j=0 and j=ny-1 are BCs)
     ny_int = ny - 2          # number of interior rows to solve
@@ -831,6 +839,10 @@ def _solve_u(
             src = -(p_np[j, ii + 1] - p_np[j, ii]) * dy / dx
             src += (1.0 - alpha_u) / alpha_u * a_P0 * u_c
             src += src_n + src_s + src_w + src_e
+            # Immersed body velocity source: Brinkman becomes (u-u_body)/ε
+            if ubody_np is not None:
+                ub_face = 0.5 * (ubody_np[j, ii] + ubody_np[j, ii + 1])
+                src += bk_face * ub_face
 
             b[k] = src
             a_P_arr[j, ii] = a_P
@@ -864,6 +876,7 @@ def _solve_v(
     inlet_velocity, lid_velocity, case: str,
     buoyancy_src: Tensor | None = None,
     nu_field: Tensor | None = None,
+    u_body: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Build and solve the implicit v-momentum equation.
 
@@ -876,6 +889,7 @@ def _solve_v(
     bk_np = brinkman.detach().numpy()
     buoy_np = buoyancy_src.detach().numpy() if buoyancy_src is not None else None
     nu_np = nu_field.detach().numpy() if nu_field is not None else nu
+    ubody_np = u_body.detach().numpy() if u_body is not None else None
 
     nv_int = (ny - 1) * nx
 
@@ -930,6 +944,9 @@ def _solve_v(
             src += (1.0 - alpha_u) / alpha_u * a_P0 * v_c
             if buoy_np is not None:
                 src += buoy_np[j, i] * dx * dy
+            if ubody_np is not None:
+                ub_face = 0.5 * (ubody_np[j - 1, i] + ubody_np[min(j, ny - 1), i])
+                src += bk_face * ub_face
 
             b[k] = src
             a_P_arr[k] = a_P
