@@ -1,10 +1,11 @@
 """Base gymnasium.Env for DiffCFD reinforcement learning environments (v0.3+).
 
-C2 patent claim: step() preserves the autograd graph (no .detach() on outputs),
-enabling policy_gradient() to return exact analytical gradients via implicit diff.
+C2 patent claim: step_differentiable() preserves the autograd graph (no .detach()
+on outputs), enabling policy_gradient() to return exact analytical gradients via
+implicit diff (C1).
 
 Mode A: single-step contextual bandit (geometry/BC optimization).
-Mode B: sequential quasi-steady-state episode (flow control, compatible with SB3/PPO).
+Mode B: sequential quasi-steady-state episode (flow control, SB3/PPO compatible).
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 import gymnasium as gym
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -22,11 +24,11 @@ class DiffCFDEnv(gym.Env):
     Subclasses must implement: _build_obs, _apply_action, _compute_reward,
     _is_terminal.
 
-    Key invariant (C2): all tensors returned by step() retain grad_fn — no
-    .detach() or .numpy() on quantities of interest.  The gymnasium contract
-    requires numpy arrays for SB3/CleanRL compatibility; the implementation
-    returns numpy arrays from step() for SB3 mode and raw tensors from
-    step_differentiable() for APG mode.
+    Key invariant (C2): all tensors returned by step_differentiable() retain
+    grad_fn — no .detach() or .numpy() on quantities of interest. The
+    gymnasium contract requires numpy arrays for SB3/CleanRL compatibility;
+    step() returns numpy arrays for SB3 mode, step_differentiable() returns
+    raw tensors for APG mode.
     """
 
     def __init__(self, solver, mode: str = "B") -> None:
@@ -34,11 +36,14 @@ class DiffCFDEnv(gym.Env):
         self.solver = solver
         self.mode = mode  # "A" (contextual bandit) or "B" (sequential episode)
         self._state: Tensor | None = None
+        self._step_count: int = 0
 
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
     ) -> tuple[Any, dict]:
-        raise NotImplementedError
+        if seed is not None:
+            self._np_random = np.random.default_rng(seed)
+        return None, {}
 
     def step(self, action) -> tuple[Any, float, bool, bool, dict]:
         """Standard gymnasium step — returns numpy arrays for SB3 compatibility."""
@@ -71,4 +76,7 @@ class DiffCFDEnv(gym.Env):
         Returns:
             Gradient tensor, same shape as action.
         """
-        raise NotImplementedError
+        action = action.detach().requires_grad_(True)
+        _, reward, _, _ = self.step_differentiable(action)
+        reward.backward()
+        return action.grad
