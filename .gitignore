@@ -18,5 +18,23 @@ build/
 .coverage
 htmlcov/
 
+# VTK output files
+*.vtk
+*.vtu
+*.pvd
+
+# Data / output
+data/
+output/
+*.png
+*.pdf
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
 # OS
 .DS_Store
+Thumbs.db

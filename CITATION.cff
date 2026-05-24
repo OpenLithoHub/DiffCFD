@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use DiffCFD in your research, please cite it as below."
+type: software
+title: "DiffCFD"
+version: "0.4.1"
+abstract: >
+  Differentiable Computational Fluid Dynamics for Steady-State Inverse Design
+  and Reinforcement Learning. PyTorch-native differentiable 2D incompressible
+  Navier-Stokes solver with matrix-free implicit differentiation through
+  SIMPLE-converged steady states.
+license: Apache-2.0
+repository-code: "https://github.com/user/diffcfd"
+keywords:
+  - differentiable-cfd
+  - navier-stokes
+  - implicit-differentiation
+  - shape-optimization
+  - reinforcement-learning
+  - pytorch

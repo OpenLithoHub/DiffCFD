@@ -300,21 +300,23 @@ class NavierStokes2D:
                         hist_g.pop(0)
                         hist_x.pop(0)
                     if len(hist_g) >= 2:
-                        # Solve least-squares for Anderson coefficients
                         G = torch.stack(list(hist_g), dim=1)  # (N, m_used)
                         try:
-                            coeffs = torch.linalg.lstsq(G, g_k).solution
-                            # Anderson extrapolation
-                            X_hist = torch.stack(list(hist_x), dim=1)
-                            x_new = x_k - (X_hist - torch.stack(list(hist_x), dim=1)) @ coeffs
+                            # Solve min ||G gamma - g_k||^2 for Anderson coefficients
+                            coeffs = torch.linalg.lstsq(G, g_k).solution  # (m_used,)
+                            # Anderson extrapolation: x_new = x_k - G @ coeffs + X_hist @ coeffs
+                            # which simplifies to: x_new = sum_i (gamma_i * x_i) + (1 - sum(gamma)) * x_k
+                            gamma_sum = coeffs.sum()
+                            X_hist = torch.stack(list(hist_x), dim=1)  # (N, m_used)
+                            x_new = x_k + (X_hist - x_k.unsqueeze(1)) @ coeffs
                             # Unpack
-                            n_ux = (ny) * (nx + 1)
+                            n_ux = ny * (nx + 1)
                             n_uy = (ny + 1) * nx
                             ux = x_new[:n_ux].reshape(ny, nx + 1)
                             uy = x_new[n_ux:n_ux + n_uy].reshape(ny + 1, nx)
                             p = x_new[n_ux + n_uy:].reshape(ny, nx)
                         except Exception:
-                            pass  # Fall back to standard iteration
+                            pass
                 hist_x.append(x_k)
 
         if return_aP:
