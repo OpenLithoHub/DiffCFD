@@ -1,4 +1,4 @@
-"""Thermophysical properties abstract interface.
+"""Thermophysical properties: ideal gas (open-source), constant props, abstract interface.
 
 All fluid property calls in diffcfd go through ThermophysicalProps so that the
 open-source core never imports a specific implementation.  The sCO2 transcritical
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+import torch
 from torch import Tensor
 
 
@@ -56,7 +57,6 @@ class ConstantProps(ThermophysicalProps):
         k: float = 1.0,
         cp: float = 1.0,
     ) -> None:
-        import torch
         self._rho = torch.tensor(rho)
         self._mu = torch.tensor(mu)
         self._k = torch.tensor(k)
