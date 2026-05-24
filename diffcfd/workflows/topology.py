@@ -105,8 +105,8 @@ def optimize_topology(
         # Design variable → density ∈ (0, 1)
         rho = torch.sigmoid(rho_raw)
 
-        # Helmholtz filter (manufacturing constraint)
-        rho_filtered = helmholtz.apply(rho)
+        # Helmholtz filter (manufacturing constraint) — differentiable path
+        rho_filtered = helmholtz.apply_differentiable(rho, n_iter=30)
 
         # Smooth Heaviside projection
         chi = smooth_heaviside(rho_filtered, beta=beta)

@@ -49,52 +49,53 @@ class _SteadyStateNS(torch.autograd.Function):
 
     Forward pass: run SIMPLE (non-differentiable, under-relaxed).
     Backward pass: solve adjoint via matrix-free GMRES on unrelaxed residual.
-
-    ctx.saved_tensors: (u_star, theta) — packed interior velocity + design param.
-    ctx.solver, ctx.case, ctx.p, ctx.sdf: stored for backward use.
+    Gradients computed w.r.t. both theta (scalar BC parameter) and sdf (geometry).
     """
 
     @staticmethod
     def forward(ctx, theta, solver, case, sdf):
-        # Detach theta so SIMPLE runs without tracking gradients
         theta_val = theta.detach()
+        sdf_val = sdf.detach() if sdf is not None else None
         if case == "channel":
             ux, uy, p, a_ux, a_uy = solver._run_simple(
-                sdf, inlet_velocity=theta_val, lid_velocity=0.0, case=case,
+                sdf_val, inlet_velocity=theta_val, lid_velocity=0.0, case=case,
                 return_aP=True
             )
         else:
             ux, uy, p, a_ux, a_uy = solver._run_simple(
-                sdf, inlet_velocity=0.0, lid_velocity=theta_val, case=case,
+                sdf_val, inlet_velocity=0.0, lid_velocity=theta_val, case=case,
                 return_aP=True
             )
         u_star = solver._pack_interior(ux, uy).detach()
-        ctx.save_for_backward(u_star, theta)
+        # Save both theta and sdf for backward (both need requires_grad tracking)
+        ctx.save_for_backward(u_star, theta, sdf_val if sdf_val is not None else torch.tensor([]))
         ctx.solver = solver
         ctx.case = case
         ctx.p = p.detach()
-        ctx.sdf = sdf
+        ctx.has_sdf = sdf is not None
         ctx.a_ux = a_ux.detach()
         ctx.a_uy = a_uy.detach()
         return ux.detach(), uy.detach(), p.detach()
 
     @staticmethod
     def backward(ctx, dL_dux, dL_duy, dL_dp):
-        u_star, theta = ctx.saved_tensors
+        u_star, theta, sdf_saved = ctx.saved_tensors
         solver = ctx.solver
         p = ctx.p
         case = ctx.case
         nx, ny = solver.nx, solver.ny
+        has_sdf = ctx.has_sdf
 
-        brinkman = None
-        if ctx.sdf is not None:
+        # Build Brinkman field differentiably (for backward)
+        if has_sdf:
             bk_eps = 1e-3
-            chi = solver.mesh.sdf_to_mask(ctx.sdf, epsilon=bk_eps)
-            brinkman = ((1.0 - chi) / bk_eps).detach()
+            sdf_for_grad = sdf_saved.detach().requires_grad_(True)
+            chi = solver.mesh.sdf_to_mask(sdf_for_grad, epsilon=bk_eps)
+            brinkman = (1.0 - chi) / bk_eps
+        else:
+            brinkman = None
+            sdf_for_grad = None
 
-        # Combined (u, p) fixed-point residual: F = [R_u(u,p,theta); div(u)]
-        # Solve adjoint system (dF/dz)^T lambda = dL/dz, then dL/dtheta = -(dF/dtheta)^T lambda
-        # This correctly handles pressure-velocity coupling via the fixed-point theorem.
         p_star = p.flatten()
         z_star = torch.cat([u_star, p_star])
         n_u = u_star.shape[0]
@@ -107,12 +108,16 @@ class _SteadyStateNS(torch.autograd.Function):
 
         theta_d = theta.detach().requires_grad_(True)
 
-        def combined_res(z, th):
-            return solver._combined_residual(z, th, n_u, case, brinkman)
+        def combined_res(z, th, sd):
+            bk = None
+            if sd is not None:
+                ch = solver.mesh.sdf_to_mask(sd, epsilon=bk_eps)
+                bk = (1.0 - ch) / bk_eps
+            return solver._combined_residual(z, th, n_u, case, bk)
 
         def matvec_Jt(v):
             _, vjp_fn = torch.func.vjp(
-                lambda z: combined_res(z, theta_d), z_star.detach()
+                lambda z: combined_res(z, theta_d, sdf_for_grad), z_star.detach()
             )
             return vjp_fn(v)[0]
 
@@ -121,11 +126,21 @@ class _SteadyStateNS(torch.autograd.Function):
             matvec_Jt, loss_z.detach(), tol=1e-5, max_iter=2000, restart=200
         )
 
+        # Gradient w.r.t. theta
         _, vjp_th = torch.func.vjp(
-            lambda th: combined_res(z_star.detach(), th), theta_d
+            lambda th: combined_res(z_star.detach(), th, sdf_for_grad), theta_d
         )
         dL_dtheta = -vjp_th(lambda_sol.detach())[0]
-        return dL_dtheta, None, None, None
+
+        # Gradient w.r.t. sdf
+        dL_dsdf = None
+        if has_sdf:
+            _, vjp_sdf = torch.func.vjp(
+                lambda sd: combined_res(z_star.detach(), theta_d, sd), sdf_for_grad
+            )
+            dL_dsdf = -vjp_sdf(lambda_sol.detach())[0]
+
+        return dL_dtheta, None, None, dL_dsdf
 
 
 class NavierStokes2D:
