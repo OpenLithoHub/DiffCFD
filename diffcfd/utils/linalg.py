@@ -161,6 +161,7 @@ def scipy_gmres(
     def callback(_):
         iters_count[0] += 1
 
-    x_np, info = spla.gmres(A_lo, b_np, x0=x0_np, rtol=tol, maxiter=max_iter, callback=callback)
+    x_np, info = spla.gmres(A_lo, b_np, x0=x0_np, rtol=tol, maxiter=max_iter,
+                             callback=callback, callback_type='legacy')
     x = torch.tensor(x_np, dtype=b.dtype, device=b.device)
     return x, iters_count[0]

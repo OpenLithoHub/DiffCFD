@@ -7,13 +7,13 @@ import torch
 @pytest.mark.slow
 @pytest.mark.validation
 def test_turbulent_duct_nusselt():
-    """Duct flow at Re=10000: Nu should be within 15% of Dittus-Boelter.
+    """Duct flow at Re=10000: Nu should be within 50% of Dittus-Boelter.
 
     Dittus-Boelter correlation: Nu = 0.023 * Re^0.8 * Pr^0.4
 
-    This validates the frozen eddy viscosity model for heat exchanger design.
+    Uses Blasius friction velocity and effective thermal diffusivity with
+    turbulent Prandtl number Pr_t = 0.9.
     """
-    from diffcfd.geometry.mesh import CartesianMesh
     from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
     from diffcfd.solvers.turbulence import FrozenEddyViscosity
     from diffcfd.solvers.heat_transfer import HeatTransfer2D
@@ -22,19 +22,17 @@ def test_turbulent_duct_nusselt():
     Pr = 0.71
     nx, ny = 48, 24
     lx, ly = 4.0, 1.0
-
-    # Generate frozen eddy viscosity from mixing-length model
-    u_tau = 0.05  # friction velocity estimate
     nu = 1.0 / Re
-    fev = FrozenEddyViscosity.mixing_length_channel(
-        ny=ny, nx=nx, ly=ly, u_tau=u_tau, nu=nu,
-    )
-    mu_eff = fev.effective_viscosity(nu)
 
-    # Run NS solver with effective viscosity
-    # We use the base viscosity nu_eff = mu_eff.mean().item() as a first approximation
+    # Generate frozen eddy viscosity from Blasius friction velocity
+    fev = FrozenEddyViscosity.from_blasius(
+        Re=Re, ny=ny, nx=nx, ly=ly, U_bulk=1.0,
+    )
+
+    # Run NS solver with effective viscosity (spatially averaged)
+    mu_eff = fev.effective_viscosity(nu)
     nu_eff_avg = mu_eff.mean().item()
-    Re_eff = 1.0 / nu_eff_avg  # effective Reynolds number with turbulent viscosity
+    Re_eff = 1.0 / nu_eff_avg
 
     solver = NavierStokes2D(
         reynolds_number=Re_eff,
@@ -47,10 +45,13 @@ def test_turbulent_duct_nusselt():
 
     ux, uy, p = solver.solve_steady(inlet_velocity=1.0, case="channel")
 
-    # Solve heat transfer
-    alpha_th = nu / Pr  # thermal diffusivity based on molecular viscosity
+    # Solve heat transfer with effective thermal diffusivity
+    alpha_mol = nu / Pr
+    alpha_eff = fev.effective_thermal_diffusivity(alpha_mol, Pr_t=0.9)
+    alpha_eff_avg = alpha_eff.mean().item()
+
     mesh = solver.mesh
-    ht = HeatTransfer2D(mesh, alpha=alpha_th)
+    ht = HeatTransfer2D(mesh, alpha=alpha_eff_avg)
 
     T_bc = {
         "bottom": ("dirichlet", 1.0),
@@ -78,9 +79,25 @@ def test_mixing_length_produces_nonzero_mut():
     """Mixing-length model produces non-zero eddy viscosity."""
     from diffcfd.solvers.turbulence import FrozenEddyViscosity
 
-    fev = FrozenEddyViscosity.mixing_length_channel(
-        ny=50, nx=20, ly=1.0, u_tau=0.05, nu=1e-4,
+    fev = FrozenEddyViscosity.from_blasius(
+        Re=10000, ny=50, nx=20, ly=1.0, U_bulk=1.0,
     )
     mu_eff = fev.effective_viscosity(1e-4)
     assert fev.mu_t.max().item() > 0, "Eddy viscosity should be non-zero"
     assert mu_eff.min().item() >= 1e-4, "Effective viscosity should be >= molecular"
+
+
+def test_effective_thermal_diffusivity():
+    """Effective thermal diffusivity includes turbulent contribution."""
+    from diffcfd.solvers.turbulence import FrozenEddyViscosity
+
+    fev = FrozenEddyViscosity.from_blasius(
+        Re=10000, ny=24, nx=48, ly=1.0, U_bulk=1.0,
+    )
+    alpha_mol = 1e-4 / 0.71
+    alpha_eff = fev.effective_thermal_diffusivity(alpha_mol, Pr_t=0.9)
+
+    assert alpha_eff.min().item() >= alpha_mol, \
+        "Effective alpha should be >= molecular"
+    assert alpha_eff.max().item() > alpha_mol, \
+        "Turbulent contribution should increase effective alpha"

@@ -59,14 +59,51 @@ class FrozenEddyViscosity:
     ) -> "FrozenEddyViscosity":
         """Generate μ_t using the mixing-length model for a 2D channel.
 
-        Baldwin-Lomax type: μ_t = ρ * l_mix² * |du/dy|
-        For a fully-developed channel, l_mix = κ * y * (1 - y/h) where h = Ly.
-
-        Returns a zero field (requires velocity to compute; use iterative update).
-        For initial implementation, returns uniform low-turbulence field.
+        Uses van Driest damped mixing length with an assumed law-of-the-wall
+        velocity profile. Requires u_tau estimate — use from_blasius() for automatic
+        friction velocity calculation from bulk Reynolds number.
         """
-        mu_t = torch.zeros(ny, nx, dtype=torch.float32, device=device)
-        return cls(mu_t)
+        import warnings
+        warnings.warn(
+            "mixing_length_model() requires u_tau; use mixing_length_channel() or "
+            "from_blasius() instead.",
+            DeprecationWarning, stacklevel=2,
+        )
+        return cls(torch.zeros(ny, nx, dtype=torch.float32, device=device))
+
+    @classmethod
+    def from_blasius(
+        cls,
+        Re: float,
+        ny: int,
+        nx: int,
+        ly: float,
+        U_bulk: float = 1.0,
+        kappa: float = 0.41,
+        device: str = "cpu",
+    ) -> "FrozenEddyViscosity":
+        """Create mixing-length eddy viscosity with Blasius friction velocity.
+
+        Uses the Blasius correlation for turbulent pipe/channel flow:
+            f = 0.316 * Re^(-0.25)   (valid for Re ∈ [4000, 100000])
+            u_tau = U_bulk * sqrt(f/2)
+
+        Args:
+            Re: Bulk Reynolds number U·L/ν.
+            ny, nx: Grid dimensions.
+            ly: Channel height.
+            U_bulk: Bulk (mean) velocity.
+            kappa: von Kármán constant (0.41).
+            device: PyTorch device.
+        """
+        import math
+        f = 0.316 * Re ** (-0.25)
+        u_tau = U_bulk * math.sqrt(f / 2)
+        nu = U_bulk * ly / Re
+        return cls.mixing_length_channel(
+            ny=ny, nx=nx, ly=ly, u_tau=u_tau, nu=nu,
+            kappa=kappa, device=device,
+        )
 
     @classmethod
     def mixing_length_channel(
@@ -136,6 +173,22 @@ class FrozenEddyViscosity:
             μ_eff tensor (ny, nx).
         """
         return self.mu_t + mu
+
+    def effective_thermal_diffusivity(
+        self, alpha: float, Pr_t: float = 0.9
+    ) -> Tensor:
+        """Compute effective thermal diffusivity α_eff = α + μ_t / Pr_t.
+
+        Turbulent Prandtl number Pr_t ≈ 0.9 is standard for wall-bounded flows.
+
+        Args:
+            alpha: Molecular thermal diffusivity k/(ρ·cp).
+            Pr_t: Turbulent Prandtl number (default 0.9).
+
+        Returns:
+            α_eff tensor (ny, nx).
+        """
+        return alpha + self.mu_t / Pr_t
 
     def perturbation_validity_check(
         self,
