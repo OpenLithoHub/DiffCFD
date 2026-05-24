@@ -50,7 +50,10 @@ def optimize_topology(
     lr: float = 0.05,
     filter_radius: float = 0.08,
     beta: float = 16.0,
+    beta_continuation: bool = True,
     inlet_velocity: float = 1.0,
+    volume_fraction: float = 0.5,
+    volume_penalty: float = 100.0,
     device: str = "cpu",
     verbose: bool = True,
 ) -> dict:
@@ -68,8 +71,11 @@ def optimize_topology(
         n_steps: Number of optimization steps.
         lr: Learning rate for Adam optimizer.
         filter_radius: Helmholtz filter radius (minimum length scale / 2).
-        beta: Heaviside projection sharpness.
+        beta: Heaviside projection sharpness (initial if continuation enabled).
+        beta_continuation: If True, ramp beta from 1 to target over first half of steps.
         inlet_velocity: Inlet velocity for channel flow.
+        volume_fraction: Target fluid fraction (default 0.5).
+        volume_penalty: Penalty weight for volume constraint violation.
         device: PyTorch device.
         verbose: Print progress.
 
@@ -92,15 +98,21 @@ def optimize_topology(
     )
 
     # Design variables: unconstrained, mapped to [0, 1] via sigmoid
-    rho_raw = torch.rand(ny, nx, device=device) * 0.5 + 0.25
-    rho_raw = rho_raw.detach().requires_grad_(True)
+    rho_raw = torch.full((ny, nx), 0.5, device=device, requires_grad=True)
 
     optimizer = torch.optim.Adam([rho_raw], lr=lr)
 
-    history = {"objective": [], "fluid_fraction": []}
+    history = {"objective": [], "fluid_fraction": [], "penalty": []}
 
     for step in range(n_steps):
         optimizer.zero_grad()
+
+        # Beta continuation: ramp from 1 to target beta over first half
+        if beta_continuation:
+            ramp_end = max(n_steps // 2, 1)
+            beta_eff = 1.0 + (beta - 1.0) * min(step / ramp_end, 1.0)
+        else:
+            beta_eff = beta
 
         # Design variable → density ∈ (0, 1)
         rho = torch.sigmoid(rho_raw)
@@ -109,10 +121,13 @@ def optimize_topology(
         rho_filtered = helmholtz.apply_differentiable(rho, n_iter=30)
 
         # Smooth Heaviside projection
-        chi = smooth_heaviside(rho_filtered, beta=beta)
+        chi = smooth_heaviside(rho_filtered, beta=beta_eff)
+
+        # Volume constraint penalty: penalize deviation from target fluid fraction
+        vol_error = chi.mean() - volume_fraction
+        vol_penalty = volume_penalty * vol_error ** 2
 
         # Convert to SDF-like field for Brinkman: positive in fluid, negative in solid
-        # chi ≈ 1 in fluid, ≈ 0 in solid → sdf ~ 2*chi - 1
         sdf_approx = 2.0 * chi - 1.0
 
         # Solve NS with Brinkman penalization
@@ -123,19 +138,21 @@ def optimize_topology(
 
         # Objective: minimize pressure drop
         dp = solver.pressure_drop(ux, uy, p)
-        loss = dp.abs()
+        loss = dp.abs() + vol_penalty
 
         loss.backward()
         optimizer.step()
 
         fluid_frac = chi.mean().item()
-        history["objective"].append(loss.item())
+        history["objective"].append(dp.abs().item())
         history["fluid_fraction"].append(fluid_frac)
+        history["penalty"].append(vol_penalty.item())
 
         if verbose and step % 5 == 0:
             print(
-                f"Step {step:3d}: |ΔP|={loss.item():.4f}, "
-                f"fluid_frac={fluid_frac:.3f}"
+                f"Step {step:3d}: |ΔP|={dp.abs().item():.4f}, "
+                f"fluid_frac={fluid_frac:.3f}, β={beta_eff:.1f}, "
+                f"penalty={vol_penalty.item():.4f}"
             )
 
     return {
