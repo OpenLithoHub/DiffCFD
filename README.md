@@ -77,10 +77,11 @@ These are design targets, not shipped functionality. Track progress in [Roadmap]
 
 - **Differentiable steady-state Navier-Stokes (v0.1)** — implemented, validated vs Ghia 1982
 - **Implicit differentiation (v0.1)** — implemented, `torch.autograd.gradcheck` passes, Poiseuille gradient < 0.01% vs analytical
-- **Conjugate heat transfer (v0.2)** — implemented, pure conduction Nu=1.0 exact, coupled NS+energy working
+- **Conjugate heat transfer (v0.2)** — implemented with differentiable PyTorch-native solver; pure conduction Nu=1.0 exact
 - **Standard `gymnasium.Env` with gradient-attached `step()` (v0.3)** — implemented, CylinderWakeEnv + HeatExchangerEnv
 - **Frozen eddy viscosity turbulence (v0.35)** — implemented, mixing-length model with van Driest damping
 - **Aerodynamic shape optimization (v0.4)** — implemented, NACA 4-digit + B-spline airfoils
+- **Helmholtz filter + topology optimization (v0.4.1)** — implemented, differentiable PDE-based filter for C3 claim
 - **Differentiable sCO₂ property surrogate (v0.2)** — planned, not yet implemented
 - **NACA + B-spline aerodynamic shape optimization with Pareto (v0.4+)** — planned extension
 
@@ -94,10 +95,11 @@ DiffCFD is developed by a single contributor in evening time. Timelines below re
 |---|---|---|---|
 | **v0.05** *(internal, never released)* | Unrolled SIMPLE on lid-driven cavity Re=100, autograd through full iteration; cross-validation reference for v0.1 | 8–12 weeks | done |
 | **v0.1** *(CN patent filing gate)* | 2D incompressible NS + matrix-free GMRES implicit diff + Poiseuille analytical gradient verification + Ghia validation Re=100/1000 | 14–20 weeks after v0.05 | done |
-| **v0.2** | Conjugate heat transfer + sCO₂ property surrogate + PCHE Nu validation | ~3 months after v0.1 | heat transfer done, sCO₂ pending |
+| **v0.2** | Conjugate heat transfer + differentiable energy solver + sCO₂ property surrogate + PCHE Nu validation | ~3 months after v0.1 | heat transfer done, sCO₂ pending |
 | **v0.3** | `gymnasium.Env` cylinder wake (Mode B) + heat exchanger fin (Mode A); APG vs SB3 PPO sample efficiency benchmark | ~3 months after v0.2 | done |
 | **v0.35** | Frozen eddy viscosity for Re > 5000 duct flows | ~6 weeks after v0.3 | done |
 | **v0.4** | NACA + B-spline aerodynamic shape optimization | ~3 months after v0.35 | done |
+| **v0.4.1** | Helmholtz filter + topology optimization (C3 embodiment); Anderson acceleration fix; grid convergence study | — | done |
 | **v0.5** | FNO/DeepONet surrogate-in-the-loop | TBD | not started |
 | **v0.6** | sCO₂ PCHE optimization, integration with sCO2-TMSR-Toolkit | TBD | not started |
 | **v1.0** | Full benchmark suite + arXiv paper | TBD | not started |
