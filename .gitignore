@@ -12,7 +12,6 @@ build/
 
 # Jupyter
 .ipynb_checkpoints/
-notebooks/*.ipynb
 
 # pytest / coverage
 .pytest_cache/
