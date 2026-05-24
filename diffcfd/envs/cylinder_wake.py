@@ -147,8 +147,10 @@ class CylinderWakeEnv(DiffCFDEnv):
     ) -> tuple[Tensor, Tensor, bool, dict]:
         self._step_count += 1
 
-        # Action modifies inlet velocity (simplified control)
-        # In full implementation, rotation adds tangential velocity on cylinder surface
+        # Action controls inlet velocity perturbation + cylinder rotation effect
+        # Rotation rate α adds a Magnus-like lateral velocity perturbation
+        rotation_rate = action[0] if isinstance(action, Tensor) and action.numel() > 0 else torch.tensor(0.0, device=self.device)
+
         u_inlet = torch.tensor(
             self.inlet_velocity, dtype=torch.float32, device=self.device
         ).requires_grad_(True)
@@ -156,6 +158,33 @@ class CylinderWakeEnv(DiffCFDEnv):
         self._ux, self._uy, self._p = self._solver.solve_steady(
             sdf=self._sdf, inlet_velocity=u_inlet, case="channel"
         )
+
+        # Apply rotation effect as a velocity perturbation near the cylinder.
+        # Rotation adds tangential velocity on the cylinder surface.
+        # Modeled as a Magnus-like perturbation that decays with distance.
+        dx, dy = self.mesh.dx, self.mesh.dy
+        x, y = self.mesh.cell_centers()  # (ny, nx)
+        # Radial distance from cylinder center
+        rx = x - self.cyl_cx
+        ry = y - self.cyl_cy
+        r_dist = torch.sqrt(rx ** 2 + ry ** 2) + 1e-10
+        # Rotation rate: α = ω·D/(2·U∞) → ω = 2·α·U∞/D
+        omega = rotation_rate * 2.0 * self.inlet_velocity / (2 * self.cyl_r)
+        decay = torch.exp(-((r_dist - self.cyl_r) / (3 * self.cyl_r)) ** 2)
+        factor = decay * self.cyl_r ** 2 / (r_dist ** 2 + self.cyl_r ** 2)
+        rot_ux = -omega * ry * factor  # (ny, nx)
+        rot_uy = omega * rx * factor   # (ny, nx)
+
+        # Interpolate cell-center perturbation to face locations
+        # ux faces: (ny, nx+1), interior faces are [1:-1, 1:-1]
+        self._ux = self._ux.clone()
+        self._uy = self._uy.clone()
+        # x-face perturbation: average of neighboring cell-center values
+        rot_ux_face = 0.5 * (rot_ux[:, :-1] + rot_ux[:, 1:])  # (ny, nx-1)
+        self._ux[1:-1, 1:-1] += rot_ux_face[1:-1, :]
+        # y-face perturbation: average of neighboring cell-center values
+        rot_uy_face = 0.5 * (rot_uy[:-1, :] + rot_uy[1:, :])  # (ny-1, nx)
+        self._uy[1:-1, :] += rot_uy_face
 
         obs = self._build_obs()
         reward = self._compute_reward()
