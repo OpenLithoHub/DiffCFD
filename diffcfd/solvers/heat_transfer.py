@@ -375,13 +375,15 @@ class HeatTransfer2D:
         dx, dy = self.mesh.dx, self.mesh.dy
 
         if wall == "bottom":
-            grad_T = (T[0, :] - T_cold) / (dy / 2)
+            # Bottom wall is at T_hot; gradient from wall to first cell center
+            grad_T = (T[0, :] - T_hot) / (dy / 2)
         elif wall == "top":
-            grad_T = (T[-1, :] - T_hot) / (dy / 2)
+            # Top wall is at T_cold; gradient from wall to last cell center
+            grad_T = (T[-1, :] - T_cold) / (dy / 2)
         elif wall == "left":
-            grad_T = (T[:, 0] - T_cold) / (dx / 2)
+            grad_T = (T[:, 0] - T_hot) / (dx / 2)
         elif wall == "right":
-            grad_T = (T[:, -1] - T_hot) / (dx / 2)
+            grad_T = (T[:, -1] - T_cold) / (dx / 2)
         else:
             raise ValueError(f"Unknown wall: {wall}")
 
