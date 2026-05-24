@@ -99,3 +99,52 @@ def test_coupled_channel_flow_heat():
     assert T.min() >= -0.01, f"T.min={T.min():.4f}"
     assert T.max() <= 1.01, f"T.max={T.max():.4f}"
     assert ux.mean() > 0, "Flow should have positive velocity"
+
+
+def test_differentiable_solve_pure_conduction():
+    """Differentiable solve matches scipy solve for pure conduction."""
+    from diffcfd.geometry.mesh import CartesianMesh
+    from diffcfd.solvers.heat_transfer import HeatTransfer2D
+
+    mesh = CartesianMesh(nx=16, ny=16, lx=1.0, ly=1.0)
+    ht = HeatTransfer2D(mesh, alpha=1.0)
+    ux = torch.zeros(16, 17)
+    uy = torch.zeros(17, 16)
+    T_bc = {
+        "bottom": ("dirichlet", 0.0),
+        "top": ("dirichlet", 1.0),
+        "left": ("neumann", 0.0),
+        "right": ("neumann", 0.0),
+    }
+    T_scipy = ht.solve(ux, uy, T_bc=T_bc)
+    T_diff = ht.solve_differentiable(ux, uy, T_bc=T_bc, max_iter=1000)
+
+    max_err = (T_scipy - T_diff).abs().max().item()
+    assert max_err < 0.02, f"Max error between scipy and differentiable: {max_err:.4f}"
+
+    Nu = ht.nusselt_number(T_diff, 1.0, 0.0, 1.0, wall="bottom")
+    assert abs(Nu.item() - 1.0) < 0.05, f"Nu={Nu.item():.4f}, expected ~1.0"
+
+
+def test_differentiable_solve_gradient_flows():
+    """Gradient of Nu w.r.t. velocity is non-zero (convection contribution)."""
+    from diffcfd.geometry.mesh import CartesianMesh
+    from diffcfd.solvers.heat_transfer import HeatTransfer2D
+
+    mesh = CartesianMesh(nx=8, ny=8, lx=1.0, ly=1.0)
+    ht = HeatTransfer2D(mesh, alpha=0.1)
+
+    ux = torch.ones(8, 9) * 0.5
+    ux.requires_grad_(True)
+    uy = torch.zeros(9, 8)
+    T_bc = {
+        "bottom": ("dirichlet", 0.0),
+        "top": ("dirichlet", 1.0),
+        "left": ("dirichlet", 0.0),
+        "right": ("neumann", 0.0),
+    }
+    T = ht.solve_differentiable(ux, uy, T_bc=T_bc, max_iter=200)
+    Nu = ht.nusselt_number(T, 1.0, 0.0, 1.0, wall="bottom")
+    Nu.backward()
+    assert ux.grad is not None
+    assert ux.grad.norm().item() > 1e-6, "Gradient of Nu w.r.t. ux should be non-zero"
