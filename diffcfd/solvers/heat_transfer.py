@@ -353,17 +353,21 @@ class HeatTransfer2D:
         T_cold: float,
         L: float,
         wall: str = "bottom",
+        T_wall: float | None = None,
     ) -> Tensor:
         """Compute average Nusselt number on a wall (differentiable).
 
         Nu = h·L/k where h = q_w / (T_hot - T_cold).
+        q_w = -k * dT/dn at the wall.
 
         Args:
             T: Temperature field (ny, nx).
-            T_hot: Hot wall temperature.
+            T_hot: Hot wall temperature (reference).
             T_cold: Cold (reference) temperature.
             L: Characteristic length.
             wall: Which wall to compute Nu on ('top', 'bottom', 'left', 'right').
+            T_wall: Temperature at the specified wall. If None, uses T_hot for
+                    bottom/left walls and T_cold for top/right walls.
 
         Returns:
             Nu_avg: Average Nusselt number (scalar tensor, differentiable).
@@ -374,16 +378,18 @@ class HeatTransfer2D:
 
         dx, dy = self.mesh.dx, self.mesh.dy
 
+        # Determine wall temperature
+        if T_wall is None:
+            T_wall = T_hot if wall in ("bottom", "left") else T_cold
+
         if wall == "bottom":
-            # Bottom wall is at T_hot; gradient from wall to first cell center
-            grad_T = (T[0, :] - T_hot) / (dy / 2)
+            grad_T = (T[0, :] - T_wall) / (dy / 2)
         elif wall == "top":
-            # Top wall is at T_cold; gradient from wall to last cell center
-            grad_T = (T[-1, :] - T_cold) / (dy / 2)
+            grad_T = (T[-1, :] - T_wall) / (dy / 2)
         elif wall == "left":
-            grad_T = (T[:, 0] - T_hot) / (dx / 2)
+            grad_T = (T[:, 0] - T_wall) / (dx / 2)
         elif wall == "right":
-            grad_T = (T[:, -1] - T_cold) / (dx / 2)
+            grad_T = (T[:, -1] - T_wall) / (dx / 2)
         else:
             raise ValueError(f"Unknown wall: {wall}")
 

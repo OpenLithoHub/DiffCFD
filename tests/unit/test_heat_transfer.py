@@ -33,8 +33,8 @@ def test_pure_conduction_linear():
     l2_err = (torch.norm(T_center - y) / torch.norm(y)).item()
     assert l2_err < 1e-5, f"Pure conduction L2 error {l2_err:.2e}"
 
-    # Nusselt number
-    Nu = ht.nusselt_number(T, T_hot=1.0, T_cold=0.0, L=1.0, wall="bottom")
+    # Nusselt number: top is hot (T=1), bottom is cold (T=0)
+    Nu = ht.nusselt_number(T, T_hot=1.0, T_cold=0.0, L=1.0, wall="top", T_wall=1.0)
     assert abs(Nu.item() - 1.0) < 1e-3, f"Nu={Nu:.4f}, expected 1.0"
 
 
@@ -122,7 +122,7 @@ def test_differentiable_solve_pure_conduction():
     max_err = (T_scipy - T_diff).abs().max().item()
     assert max_err < 0.02, f"Max error between scipy and differentiable: {max_err:.4f}"
 
-    Nu = ht.nusselt_number(T_diff, 1.0, 0.0, 1.0, wall="bottom")
+    Nu = ht.nusselt_number(T_diff, 1.0, 0.0, 1.0, wall="top", T_wall=1.0)
     assert abs(Nu.item() - 1.0) < 0.05, f"Nu={Nu.item():.4f}, expected ~1.0"
 
 
@@ -144,7 +144,7 @@ def test_differentiable_solve_gradient_flows():
         "right": ("neumann", 0.0),
     }
     T = ht.solve_differentiable(ux, uy, T_bc=T_bc, max_iter=200)
-    Nu = ht.nusselt_number(T, 1.0, 0.0, 1.0, wall="bottom")
+    Nu = ht.nusselt_number(T, 1.0, 0.0, 1.0, wall="top", T_wall=1.0)
     Nu.backward()
     assert ux.grad is not None
     assert ux.grad.norm().item() > 1e-6, "Gradient of Nu w.r.t. ux should be non-zero"
