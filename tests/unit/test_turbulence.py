@@ -49,3 +49,25 @@ def test_perturbation_check():
     )
     cos_sim = mu_t1.perturbation_validity_check(mu_t2.mu_t)
     assert abs(cos_sim - 1.0) < 1e-5, "Same μ_t should have cosine similarity 1.0"
+
+
+def test_turbulence_in_ns_solver():
+    """Test that FrozenEddyViscosity can be passed to NavierStokes2D."""
+    from diffcfd.solvers.turbulence import FrozenEddyViscosity
+    from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
+
+    mu_t = FrozenEddyViscosity.mixing_length_channel(
+        ny=16, nx=32, ly=1.0, u_tau=0.05, nu=1e-3
+    )
+    solver = NavierStokes2D(
+        reynolds_number=1000, grid=(32, 16), lx=4.0, ly=1.0,
+        turbulence=mu_t,
+    )
+    assert solver._nu_field is not None
+    assert solver._nu_field.shape == (16, 32)
+    assert solver._nu_field.min() >= 1e-3
+
+    # Run solver — should converge with turbulent viscosity
+    ux, uy, p = solver.solve_steady(inlet_velocity=1.0, case="channel")
+    assert ux.shape == (16, 33)
+    assert torch.isfinite(ux).all()

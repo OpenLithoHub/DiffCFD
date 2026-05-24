@@ -171,6 +171,7 @@ class NavierStokes2D:
         lx: float = 1.0,
         ly: float = 1.0,
         anderson_depth: int = 0,
+        turbulence: "FrozenEddyViscosity | None" = None,
     ) -> None:
         self.re = reynolds_number
         self.nx, self.ny = grid
@@ -183,7 +184,12 @@ class NavierStokes2D:
         self.anderson_depth = anderson_depth
         self.mesh = CartesianMesh(self.nx, self.ny, lx=lx, ly=ly, device=device)
         self.bc = BoundaryConditions(self.mesh)
-        self._nu = 1.0 / reynolds_number
+        self._nu_lam = 1.0 / reynolds_number
+        if turbulence is not None:
+            self._nu_field = turbulence.effective_viscosity(self._nu_lam)
+        else:
+            self._nu_field = None
+        self._nu = self._nu_lam
 
     # ------------------------------------------------------------------
     # Public API
@@ -246,6 +252,7 @@ class NavierStokes2D:
         nx = self.nx
         ny = self.ny
         nu = self._nu
+        nu_field = self._nu_field
         dev = self.device
 
         bk_eps = 1e-3
@@ -272,11 +279,12 @@ class NavierStokes2D:
             # Step 1: implicit momentum solve
             ux_star, a_ux = _solve_u(
                 ux, uy, p, nu, dx, dy, self.alpha_u, brinkman, nx, ny,
-                inlet_velocity, lid_velocity, case
+                inlet_velocity, lid_velocity, case, nu_field=nu_field
             )
             uy_star, a_uy = _solve_v(
                 ux, uy, p, nu, dx, dy, self.alpha_u, brinkman, nx, ny,
-                inlet_velocity, lid_velocity, case, buoyancy_src=buoyancy_src
+                inlet_velocity, lid_velocity, case,
+                buoyancy_src=buoyancy_src, nu_field=nu_field
             )
 
             ux_star, uy_star, _ = self._apply_bcs(
@@ -384,7 +392,8 @@ class NavierStokes2D:
             Residual vector, same shape as u_flat.
         """
         nx, ny = self.nx, self.ny
-        dx, dy, nu = self.mesh.dx, self.mesh.dy, self._nu
+        dx, dy = self.mesh.dx, self.mesh.dy
+        nu = self._nu_field if self._nu_field is not None else self._nu
         dev = u_flat.device
         dt = u_flat.dtype
 
@@ -418,8 +427,11 @@ class NavierStokes2D:
         # u-momentum residual for interior ux faces: j=1..ny-2, ii=0..nx-2
         # physical col = ii+1, so ux[:, 1:-1] are the interior faces
         # ------------------------------------------------------------------
-        D = nu / dx   # diffusion coefficient (same in x)
-        Dn = nu / dy
+        # Face-averaged viscosity for x-faces: average of left and right cell
+        nu_x_face = 0.5 * (nu[1:-1, :-1] + nu[1:-1, 1:]) if isinstance(nu, Tensor) else nu
+        nu_y_face = 0.5 * (nu[:-1, :] + nu[1:, :]) if isinstance(nu, Tensor) else nu
+        D = nu_x_face / dx   # diffusion coefficient (x-direction)
+        Dn = nu_y_face / dy
 
         # Interior ux block: shape (ny-2, nx-1), rows j=1..ny-2, cols ii=0..nx-2
         # u_c = ux[1:-1, 1:-1]  (already = ux_int but through ux tensor for grad)
@@ -530,8 +542,13 @@ class NavierStokes2D:
         # ------------------------------------------------------------------
         # v-momentum residual for interior uy faces: j=1..ny-1 (all nx cols)
         # ------------------------------------------------------------------
-        Dx = nu / dx
-        Dy = nu / dy
+        # Cell-center viscosity for v-momentum cells (average of j-1 and j rows)
+        if isinstance(nu, Tensor):
+            nu_vc = 0.5 * (nu[:-1, :] + nu[1:, :])   # (ny-1, nx)
+        else:
+            nu_vc = nu
+        Dx = nu_vc / dx if isinstance(nu, Tensor) else nu / dx
+        Dy = nu_vc / dy if isinstance(nu, Tensor) else nu / dy
 
         v_c = uy[1:-1, :]    # (ny-1, nx): interior uy = uy_int
 
@@ -704,6 +721,7 @@ def _solve_u(
     nu: float, dx: float, dy: float, alpha_u: float,
     brinkman: Tensor, nx: int, ny: int,
     inlet_velocity, lid_velocity, case: str,
+    nu_field: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Build and solve the implicit u-momentum equation.
 
@@ -718,6 +736,7 @@ def _solve_u(
     uy_np = uy.detach().numpy()
     p_np  = p.detach().numpy()
     bk_np = brinkman.detach().numpy()
+    nu_np = nu_field.detach().numpy() if nu_field is not None else nu
 
     # Interior y-rows: j = 1..ny-2  (boundary rows j=0 and j=ny-1 are BCs)
     ny_int = ny - 2          # number of interior rows to solve
@@ -758,10 +777,11 @@ def _solve_u(
             F_n = v_c
             F_s = v_c
 
-            D_e = nu / dx
-            D_w = nu / dx
-            D_n = nu / dy
-            D_s = nu / dy
+            nu_cell = nu_np[j, ii + 1] if isinstance(nu_np, np.ndarray) else nu_np
+            D_e = nu_cell / dx
+            D_w = nu_cell / dx
+            D_n = nu_cell / dy
+            D_s = nu_cell / dy
 
             # East: if at the right boundary, Neumann outlet → zero coefficient, no source
             if ii + 1 >= nx - 1:
@@ -843,6 +863,7 @@ def _solve_v(
     brinkman: Tensor, nx: int, ny: int,
     inlet_velocity, lid_velocity, case: str,
     buoyancy_src: Tensor | None = None,
+    nu_field: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Build and solve the implicit v-momentum equation.
 
@@ -854,6 +875,7 @@ def _solve_v(
     p_np  = p.detach().numpy()
     bk_np = brinkman.detach().numpy()
     buoy_np = buoyancy_src.detach().numpy() if buoyancy_src is not None else None
+    nu_np = nu_field.detach().numpy() if nu_field is not None else nu
 
     nv_int = (ny - 1) * nx
 
@@ -885,10 +907,11 @@ def _solve_v(
             F_e = u_c if i < nx - 1 else 0.0
             F_w = u_c if i > 0      else 0.0
 
-            D_n = nu / dy if j + 1 < ny else 0.0
-            D_s = nu / dy
-            D_e = nu / dx if i < nx - 1 else 0.0
-            D_w = nu / dx if i > 0      else 0.0
+            nu_cell = nu_np[j, i] if isinstance(nu_np, np.ndarray) else nu_np
+            D_n = nu_cell / dy if j + 1 < ny else 0.0
+            D_s = nu_cell / dy
+            D_e = nu_cell / dx if i < nx - 1 else 0.0
+            D_w = nu_cell / dx if i > 0      else 0.0
 
             def hybrid(F, D):
                 return max(abs(D) - 0.5 * abs(F), 0.0) + max(0.0, -F)
