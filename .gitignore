@@ -26,6 +26,9 @@ htmlcov/
 # Data / output
 data/
 output/
+results/
+*.pt
+*.npz
 *.png
 *.pdf
 
