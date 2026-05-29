@@ -20,17 +20,20 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install maturin
-        run: pip install maturin
-
-      - name: Install Python dependencies
+      - name: Create virtualenv and install dependencies
         run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install maturin torch --index-url https://download.pytorch.org/whl/cpu
           pip install numpy scipy matplotlib pyamg "gymnasium>=0.26" meshio pyevtk pytest
 
       - name: Build and install package
-        run: maturin build --release --interpreter python3 && pip install --force-reinstall --no-deps target/wheels/*.whl
+        run: |
+          . .venv/bin/activate
+          maturin develop --release
 
       - name: Run unit tests
-        run: cd /tmp && python -m pytest $GITHUB_WORKSPACE/tests/unit/ -v --tb=short
+        run: |
+          . .venv/bin/activate
+          python -m pytest tests/unit/ -v --tb=short
         timeout-minutes: 15
