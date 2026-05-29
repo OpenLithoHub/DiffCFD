@@ -1,0 +1,15 @@
+[package]
+name = "diffcfd_rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "diffcfd_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module"] }
+numpy = "0.24"
+ndarray = "0.16"
+rayon = "1.10"
+faer = "0.20"
