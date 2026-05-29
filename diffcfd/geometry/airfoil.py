@@ -264,8 +264,8 @@ def compute_forces(
     dx, dy = mesh.dx, mesh.dy
 
     # Pressure gradient across body surface
-    dp_dx = (p[:, 1:] - p[:, :-1]) / dx  # (ny, nx-1)
-    dp_dy = (p[1:, :] - p[:-1, :]) / dy  # (ny-1, nx)
+    _dp_dx = (p[:, 1:] - p[:, :-1]) / dx  # (ny, nx-1)
+    _dp_dy = (p[1:, :] - p[:-1, :]) / dy  # (ny-1, nx)
 
     # Integrate pressure force over body surface
     # Use gradient of body_mask as surface normal indicator

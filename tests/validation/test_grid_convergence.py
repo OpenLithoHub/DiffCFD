@@ -89,7 +89,7 @@ def test_richardson_extrapolation():
         qoi_values.append(u_at_05)
 
     f_coarse, f_medium, f_fine = qoi_values
-    h_coarse, h_medium, h_fine = 1.0 / 16, 1.0 / 32, 1.0 / 64
+    h_coarse, h_medium, _h_fine = 1.0 / 16, 1.0 / 32, 1.0 / 64
     ratio = h_coarse / h_medium  # = 2 for uniform refinement
 
     # Richardson extrapolation order estimate

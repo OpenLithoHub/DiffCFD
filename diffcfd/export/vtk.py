@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 from torch import Tensor
 
 
@@ -16,9 +17,8 @@ def _cell_center_velocity(ux: Tensor, uy: Tensor) -> tuple:
     return ux_cc, uy_cc
 
 
-def _cell_center_vorticity(ux_cc, uy_cc, dx: float, dy: float) -> "numpy.ndarray":
+def _cell_center_vorticity(ux_cc, uy_cc, dx: float, dy: float) -> np.ndarray:
     """Compute z-component of vorticity at cell centers: ω = ∂v/∂x - ∂u/∂y."""
-    import numpy as np
     dvdx = np.zeros_like(uy_cc)
     dudy = np.zeros_like(ux_cc)
     dvdx[:, 1:-1] = (uy_cc[:, 2:] - uy_cc[:, :-2]) / (2 * dx)
@@ -58,8 +58,6 @@ def save_vtk(
         T: Optional temperature field (ny, nx).
         extra_scalars: Optional dict of name → scalar field (ny, nx).
     """
-    import numpy as np
-
     path = Path(path)
     if path.suffix != ".vtk":
         path = path.with_suffix(".vtk")

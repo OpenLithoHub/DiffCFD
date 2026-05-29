@@ -46,7 +46,7 @@ def test_mixing_length_profile():
 
     # Check 4: Blasius friction velocity matches expected value
     f_expected = 0.316 * Re ** (-0.25)
-    u_tau_expected = math.sqrt(f_expected / 2)
+    _u_tau_expected = math.sqrt(f_expected / 2)
     # The model should produce consistent u_tau
     assert fev.mu_t.max().item() > 0, "mu_t should be non-zero"
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -232,7 +231,7 @@ def run_sco2_training():
     print("=" * 60)
 
     from diffcfd.props.sco2 import (
-        SCO2Surrogate, TC, PC, generate_training_data, train_sco2_surrogate
+        TC, PC, generate_training_data, train_sco2_surrogate
     )
 
     # Generate high-quality training data covering the transcritical region
@@ -598,7 +597,7 @@ def main():
     poiseuille_results = run_poiseuille_validation()
 
     # Step 3: Gradient convergence
-    gradient_results = run_gradient_convergence()
+    _gradient_results = run_gradient_convergence()
 
     # Step 4: sCO2 surrogate training
     sco2_results = run_sco2_training()

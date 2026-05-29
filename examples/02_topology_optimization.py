@@ -7,12 +7,8 @@ Demonstrates the C3 patent embodiment:
 All within a single PyTorch autograd computational graph.
 """
 
-import torch
 from diffcfd import (
-    NavierStokes2D,
-    HelmholtzFilter,
     optimize_topology,
-    smooth_heaviside,
 )
 
 if __name__ == "__main__":
@@ -29,7 +25,7 @@ if __name__ == "__main__":
         inlet_velocity=1.0,
         verbose=True,
     )
-    print(f"\nOptimization complete.")
+    print("\nOptimization complete.")
     print(f"Final |ΔP|: {result['history']['objective'][-1]:.4f}")
     print(f"Fluid fraction: {result['history']['fluid_fraction'][-1]:.3f}")
     print(f"Design shape: {result['chi'].shape}")

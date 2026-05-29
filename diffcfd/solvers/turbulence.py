@@ -136,7 +136,7 @@ class FrozenEddyViscosity:
             device: PyTorch device.
         """
         dy = ly / ny
-        y_plus_max = u_tau * ly / (2 * nu)
+        _y_plus_max = u_tau * ly / (2 * nu)
 
         # Cell center positions (distance from nearest wall)
         y = torch.arange(ny, dtype=torch.float32, device=device) * dy + dy / 2

@@ -21,7 +21,7 @@ print(f"Initial obs: {obs[:5].tolist()}")
 
 # Standard gymnasium step (returns numpy for SB3 compatibility)
 obs, reward, done, truncated, info = env.step([0.5])
-print(f"\nAfter step [0.5]:")
+print("\nAfter step [0.5]:")
 print(f"  reward={reward:.4f}, done={done}, info={info}")
 
 # Differentiable step (preserves autograd graph — C2 claim)
@@ -30,7 +30,7 @@ obs_diff, reward_diff, done_diff, info_diff = env.step_differentiable(action)
 
 # Compute analytical gradient of reward w.r.t. action
 reward_diff.backward()
-print(f"\nDifferentiable step:")
+print("\nDifferentiable step:")
 print(f"  reward={reward_diff.item():.4f}")
 print(f"  dR/d(action)={action.grad.item():.6f}")
 

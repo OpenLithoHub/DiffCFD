@@ -33,6 +33,8 @@ References:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
@@ -41,6 +43,9 @@ from torch import Tensor
 
 from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.solvers.boundary import BoundaryConditions
+
+if TYPE_CHECKING:
+    from diffcfd.solvers.turbulence import FrozenEddyViscosity
 
 
 class _SteadyStateNS(torch.autograd.Function):
@@ -82,17 +87,17 @@ class _SteadyStateNS(torch.autograd.Function):
         solver = ctx.solver
         p = ctx.p
         case = ctx.case
-        nx, ny = solver.nx, solver.ny
+        _nx, _ny = solver.nx, solver.ny
         has_sdf = ctx.has_sdf
 
         # Build Brinkman field differentiably (for backward)
+        bk_eps = 1e-3
         if has_sdf:
-            bk_eps = 1e-3
             sdf_for_grad = sdf_saved.detach().requires_grad_(True)
             chi = solver.mesh.sdf_to_mask(sdf_for_grad, epsilon=bk_eps)
-            brinkman = (1.0 - chi) / bk_eps
+            _brinkman = (1.0 - chi) / bk_eps
         else:
-            brinkman = None
+            _brinkman = None
             sdf_for_grad = None
 
         p_star = p.flatten()
@@ -283,7 +288,7 @@ class NavierStokes2D:
         hist_g = []  # previous residuals (g_k = x_k - x_{k-1})
 
         for it in range(self.max_iter):
-            ux_old, uy_old, p_old = ux, uy, p
+            _ux_old, _uy_old, p_old = ux, uy, p
 
             # Step 1: implicit momentum solve
             ux_star, a_ux = _solve_u(
@@ -505,11 +510,11 @@ class NavierStokes2D:
         # North boundary contribution (row j=ny-2, i.e. last row of u_c):
         # a_n_val * u_north_wall → source
         a_n_bc = a_n_full[-1:, :]     # (1, nx-1): BC row
-        src_n_bc = (a_n_bc * u_north_wall).unsqueeze(0)  # → added to RHS for last row
+        _src_n_bc = (a_n_bc * u_north_wall).unsqueeze(0)  # → added to RHS for last row
 
         # South boundary contribution (row j=1, i.e. first row of u_c):
         a_s_bc = a_s_full[:1, :]      # (1, nx-1): BC row
-        src_s_bc = (a_s_bc * u_south_wall).unsqueeze(0)
+        _src_s_bc = (a_s_bc * u_south_wall).unsqueeze(0)
 
         # West boundary (inlet) contribution (col ii=0):
         # a_w * inlet_velocity → source for leftmost interior col
@@ -591,12 +596,12 @@ class NavierStokes2D:
         F_ve_all = u_c_v
         F_vw_all = u_c_v
 
-        D_vn = torch.where(
+        _D_vn = torch.where(
             torch.arange(ny - 1, device=dev).unsqueeze(1) < ny - 2,
             torch.full((1,), Dy, device=dev, dtype=dt),
             torch.zeros((1,), device=dev, dtype=dt)
         )
-        D_vs = torch.full((ny - 1, nx), Dy, device=dev, dtype=dt)
+        _D_vs = torch.full((ny - 1, nx), Dy, device=dev, dtype=dt)
 
         a_vn_full = torch.where(
             torch.arange(ny - 1, device=dev).unsqueeze(1) < ny - 2,
