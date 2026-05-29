@@ -186,7 +186,7 @@ def optimize_topology(
 
         # Convergence monitoring (B.1)
         if convergence_monitor is not None:
-            from diffcfd.workflows.convergence import ConvergenceAction
+            from diff_surrogate.convergence import ConvergenceAction
             action = convergence_monitor.update(dp.abs().item(), step)
             if action == ConvergenceAction.EARLY_STOP:
                 if verbose:
@@ -429,7 +429,7 @@ def multi_corner_optimize(
 
         # Convergence monitoring
         if convergence_monitor is not None:
-            from diffcfd.workflows.convergence import ConvergenceAction
+            from diff_surrogate.convergence import ConvergenceAction
             action = convergence_monitor.update(combined_loss.item(), step)
             if action == ConvergenceAction.EARLY_STOP:
                 converged_early = True
