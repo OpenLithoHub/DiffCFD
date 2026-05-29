@@ -10,6 +10,9 @@ build/
 *.egg
 *.so
 
+# Rust / Cargo
+target/
+
 # Jupyter
 .ipynb_checkpoints/
 
