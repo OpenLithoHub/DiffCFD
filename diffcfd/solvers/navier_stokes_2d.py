@@ -728,8 +728,15 @@ class NavierStokes2D:
 
 
 # ------------------------------------------------------------------
-# Solver kernels
+# Solver kernels — Rust-accelerated via diffcfd._diffcfd_rust
 # ------------------------------------------------------------------
+
+from diffcfd._diffcfd_rust import (
+    build_momentum_u as _rust_build_u,
+    build_momentum_v as _rust_build_v,
+    build_pressure_system as _rust_build_p,
+)
+
 
 def _solve_u(
     ux: Tensor, uy: Tensor, p: Tensor,
@@ -739,137 +746,29 @@ def _solve_u(
     nu_field: Tensor | None = None,
     u_body: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Build and solve the implicit u-momentum equation.
+    """Build and solve the implicit u-momentum equation (Rust-accelerated)."""
+    inlet_val = float(inlet_velocity) if isinstance(inlet_velocity, (int, float)) else inlet_velocity.item()
+    lid_val = float(lid_velocity) if isinstance(lid_velocity, (int, float)) else lid_velocity.item()
 
-    Returns (u_star, a_P_field) where a_P_field shape is (ny, nx-1).
-    """
-    ux_np = ux.detach().numpy()
-    uy_np = uy.detach().numpy()
-    p_np  = p.detach().numpy()
-    bk_np = brinkman.detach().numpy()
-    nu_np = nu_field.detach().numpy() if nu_field is not None else nu
-    ubody_np = u_body.detach().numpy() if u_body is not None else None
-
-    # Interior y-rows: j = 1..ny-2  (boundary rows j=0 and j=ny-1 are BCs)
-    ny_int = ny - 2          # number of interior rows to solve
-    nu_int = ny_int * (nx - 1)
-
-    rows, cols, vals = [], [], []
-    b = np.zeros(nu_int, dtype=np.float64)
-    a_P_arr = np.full((ny, nx - 1), 1e30, dtype=np.float64)  # large → 1/a_P≈0 for BC rows
-
-    def I(j_int, i_int):
-        # j_int in [0, ny-3] → physical j = j_int + 1
-        return j_int * (nx - 1) + i_int
-
-    # Boundary u-values for source terms
-    u_south_wall = 0.0           # bottom no-slip (all cases)
-    if case == "cavity":
-        u_north_wall = float(lid_velocity) if isinstance(lid_velocity, (int, float)) \
-                       else lid_velocity.item()
-    else:
-        u_north_wall = 0.0       # top no-slip for channel
-
-    def hybrid(F, D):
-        return max(abs(D) - 0.5 * abs(F), 0.0) + max(0.0, -F)
-
-    for j_int in range(ny_int):   # j_int in [0, ny-3], physical j = j_int + 1
-        j = j_int + 1
-        for ii in range(nx - 1):   # ii = interior index, physical col = ii+1
-            k = I(j_int, ii)
-            u_c = ux_np[j, ii + 1]
-
-            u_e_face = 0.5 * (ux_np[j, ii + 2] if ii + 2 <= nx else ux_np[j, nx]) + 0.5 * u_c
-            u_w_face = 0.5 * ux_np[j, ii] + 0.5 * u_c
-
-            v_c = 0.25 * (uy_np[j, ii] + uy_np[j, ii + 1] + uy_np[j + 1, ii] + uy_np[j + 1, ii + 1])
-
-            F_e = u_e_face
-            F_w = u_w_face
-            F_n = v_c
-            F_s = v_c
-
-            nu_cell = nu_np[j, ii + 1] if isinstance(nu_np, np.ndarray) else nu_np
-            D_e = nu_cell / dx
-            D_w = nu_cell / dx
-            D_n = nu_cell / dy
-            D_s = nu_cell / dy
-
-            # East: if at the right boundary, Neumann outlet → zero coefficient, no source
-            if ii + 1 >= nx - 1:
-                a_e_val = 0.0; a_e_matrix = 0.0; src_e = 0.0
-            else:
-                a_e_val = hybrid(F_e, D_e); a_e_matrix = a_e_val; src_e = 0.0
-
-            # West: if at the left boundary, Dirichlet inlet BC source
-            a_w_val = hybrid(-F_w, D_w)
-            if ii == 0:
-                u_inlet_val = float(inlet_velocity) if isinstance(inlet_velocity, (int, float)) \
-                              else inlet_velocity.item()
-                src_w = a_w_val * (u_inlet_val if case == "channel" else 0.0)
-                a_w_matrix = 0.0
-            else:
-                src_w = 0.0
-                a_w_matrix = a_w_val
-
-            # North: if j+1 is the lid row (j == ny-2) → Dirichlet BC source, no matrix entry
-            # Otherwise: interior row → matrix entry
-            if j + 1 == ny - 1:    # next row is boundary (top wall)
-                a_n_val = hybrid(F_n, D_n)
-                src_n = a_n_val * u_north_wall  # Dirichlet source
-                a_n_matrix = 0.0
-            elif j_int + 1 < ny_int:
-                a_n_val = hybrid(F_n, D_n)
-                src_n = 0.0
-                a_n_matrix = a_n_val
-            else:
-                a_n_val = 0.0; src_n = 0.0; a_n_matrix = 0.0
-
-            if j - 1 == 0:         # prev row is boundary (bottom wall)
-                a_s_val = hybrid(-F_s, D_s)
-                src_s = a_s_val * u_south_wall
-                a_s_matrix = 0.0
-            elif j_int - 1 >= 0:
-                a_s_val = hybrid(-F_s, D_s)
-                src_s = 0.0
-                a_s_matrix = a_s_val
-            else:
-                a_s_val = 0.0; src_s = 0.0; a_s_matrix = 0.0
-
-            bk_face = 0.5 * (bk_np[j, ii] + bk_np[j, ii + 1])
-            a_P0 = a_e_val + a_w_val + a_n_val + a_s_val + bk_face
-            a_P  = a_P0 / alpha_u
-
-            src = -(p_np[j, ii + 1] - p_np[j, ii]) * dy / dx
-            src += (1.0 - alpha_u) / alpha_u * a_P0 * u_c
-            src += src_n + src_s + src_w + src_e
-            # Immersed body velocity source: Brinkman becomes (u-u_body)/ε
-            if ubody_np is not None:
-                ub_face = 0.5 * (ubody_np[j, ii] + ubody_np[j, ii + 1])
-                src += bk_face * ub_face
-
-            b[k] = src
-            a_P_arr[j, ii] = a_P
-
-            rows.append(k); cols.append(k); vals.append(a_P)
-            if a_e_matrix > 0.0:
-                rows.append(k); cols.append(I(j_int, ii + 1)); vals.append(-a_e_matrix)
-            if a_w_matrix > 0.0:
-                rows.append(k); cols.append(I(j_int, ii - 1)); vals.append(-a_w_matrix)
-            if a_n_matrix > 0.0:
-                rows.append(k); cols.append(I(j_int + 1, ii)); vals.append(-a_n_matrix)
-            if a_s_matrix > 0.0:
-                rows.append(k); cols.append(I(j_int - 1, ii)); vals.append(-a_s_matrix)
-
-    A = sp.csr_matrix(
-        (np.array(vals), (np.array(rows), np.array(cols))),
-        shape=(nu_int, nu_int)
+    indptr, indices, data, rhs, aP = _rust_build_u(
+        ux.detach().numpy().astype(np.float64),
+        uy.detach().numpy().astype(np.float64),
+        p.detach().numpy().astype(np.float64),
+        brinkman.detach().numpy().astype(np.float64),
+        float(nu), float(dx), float(dy), float(alpha_u),
+        nx, ny, inlet_val, lid_val, case,
+        nu_field.detach().numpy().astype(np.float64) if nu_field is not None else None,
+        u_body.detach().numpy().astype(np.float64) if u_body is not None else None,
     )
-    sol = spla.spsolve(A, b).reshape(ny_int, nx - 1)
+
+    ny_int = ny - 2
+    nu_int = ny_int * (nx - 1)
+    A = sp.csr_matrix((data, indices, indptr), shape=(nu_int, nu_int))
+    sol = spla.spsolve(A, rhs).reshape(ny_int, nx - 1)
 
     ux_star = ux.clone()
     ux_star[1:ny-1, 1:nx] = torch.tensor(sol, dtype=torch.float32, device=ux.device)
-    a_P_t = torch.tensor(a_P_arr, dtype=torch.float32, device=ux.device)
+    a_P_t = torch.tensor(aP.reshape(ny, nx - 1), dtype=torch.float32, device=ux.device)
     return ux_star, a_P_t
 
 
@@ -882,158 +781,40 @@ def _solve_v(
     nu_field: Tensor | None = None,
     u_body: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Build and solve the implicit v-momentum equation.
-
-    Returns (uy_star, a_P_field) for interior y-faces (rows 1..ny-1).
-    a_P_field shape: (ny-1, nx).
-    """
-    ux_np = ux.detach().numpy()
-    uy_np = uy.detach().numpy()
-    p_np  = p.detach().numpy()
-    bk_np = brinkman.detach().numpy()
-    buoy_np = buoyancy_src.detach().numpy() if buoyancy_src is not None else None
-    nu_np = nu_field.detach().numpy() if nu_field is not None else nu
-    ubody_np = u_body.detach().numpy() if u_body is not None else None
+    """Build and solve the implicit v-momentum equation (Rust-accelerated)."""
+    indptr, indices, data, rhs, aP = _rust_build_v(
+        ux.detach().numpy().astype(np.float64),
+        uy.detach().numpy().astype(np.float64),
+        p.detach().numpy().astype(np.float64),
+        brinkman.detach().numpy().astype(np.float64),
+        float(nu), float(dx), float(dy), float(alpha_u),
+        nx, ny,
+        buoyancy_src.detach().numpy().astype(np.float64) if buoyancy_src is not None else None,
+        nu_field.detach().numpy().astype(np.float64) if nu_field is not None else None,
+        u_body.detach().numpy().astype(np.float64) if u_body is not None else None,
+    )
 
     nv_int = (ny - 1) * nx
-
-    rows, cols, vals = [], [], []
-    b = np.zeros(nv_int, dtype=np.float64)
-    a_P_arr = np.zeros(nv_int, dtype=np.float64)
-
-    def I(jj, i):   # jj in [0, ny-2], physical row j = jj+1
-        return jj * nx + i
-
-    for jj in range(ny - 1):   # physical j = jj+1
-        j = jj + 1
-        for i in range(nx):
-            k = I(jj, i)
-            v_c = uy_np[j, i]
-
-            v_n_face = 0.5 * (uy_np[j + 1, i] if j + 1 <= ny - 1 else 0.0) + 0.5 * v_c
-            v_s_face = 0.5 * uy_np[j - 1, i] + 0.5 * v_c
-
-            # u at this y-face (bilinear average)
-            u_sw = ux_np[j - 1, i    ]
-            u_se = ux_np[j - 1, i + 1]
-            u_nw = ux_np[j,     i    ]
-            u_ne = ux_np[j,     i + 1]
-            u_c = 0.25 * (u_sw + u_se + u_nw + u_ne)
-
-            F_n = v_n_face if j + 1 <= ny - 1 else 0.0
-            F_s = v_s_face
-            F_e = u_c if i < nx - 1 else 0.0
-            F_w = u_c if i > 0      else 0.0
-
-            nu_cell = nu_np[j, i] if isinstance(nu_np, np.ndarray) else nu_np
-            D_n = nu_cell / dy if j + 1 < ny else 0.0
-            D_s = nu_cell / dy
-            D_e = nu_cell / dx if i < nx - 1 else 0.0
-            D_w = nu_cell / dx if i > 0      else 0.0
-
-            def hybrid(F, D):
-                return max(abs(D) - 0.5 * abs(F), 0.0) + max(0.0, -F)
-
-            a_n = hybrid( F_n, D_n) if jj + 1 < ny - 1 else 0.0
-            a_s = hybrid(-F_s, D_s) if jj - 1 >= 0      else 0.0
-            a_e = hybrid( F_e, D_e) if i + 1 < nx       else 0.0
-            a_w = hybrid(-F_w, D_w) if i - 1 >= 0       else 0.0
-
-            bk_face = 0.5 * (bk_np[j - 1, i] + bk_np[min(j, ny-1), i])
-
-            a_P0 = a_n + a_s + a_e + a_w + bk_face
-            a_P  = a_P0 / alpha_u
-
-            src = -(p_np[j, i] - p_np[j - 1, i]) * dx / dy
-            src += (1.0 - alpha_u) / alpha_u * a_P0 * v_c
-            if buoy_np is not None:
-                src += buoy_np[j, i] * dx * dy
-            if ubody_np is not None:
-                ub_face = 0.5 * (ubody_np[j - 1, i] + ubody_np[min(j, ny - 1), i])
-                src += bk_face * ub_face
-
-            b[k] = src
-            a_P_arr[k] = a_P
-
-            rows.append(k); cols.append(k); vals.append(a_P)
-            if jj + 1 < ny - 1:
-                rows.append(k); cols.append(I(jj + 1, i)); vals.append(-a_n)
-            if jj - 1 >= 0:
-                rows.append(k); cols.append(I(jj - 1, i)); vals.append(-a_s)
-            if i + 1 < nx:
-                rows.append(k); cols.append(I(jj, i + 1)); vals.append(-a_e)
-            if i - 1 >= 0:
-                rows.append(k); cols.append(I(jj, i - 1)); vals.append(-a_w)
-
-    A = sp.csr_matrix(
-        (np.array(vals), (np.array(rows), np.array(cols))),
-        shape=(nv_int, nv_int)
-    )
-    sol = spla.spsolve(A, b).reshape(ny - 1, nx)
+    A = sp.csr_matrix((data, indices, indptr), shape=(nv_int, nv_int))
+    sol = spla.spsolve(A, rhs).reshape(ny - 1, nx)
 
     uy_star = uy.clone()
     uy_star[1:ny, :] = torch.tensor(sol, dtype=torch.float32, device=uy.device)
-    a_P_t = torch.tensor(a_P_arr.reshape(ny - 1, nx), dtype=torch.float32, device=uy.device)
+    a_P_t = torch.tensor(aP.reshape(ny - 1, nx), dtype=torch.float32, device=uy.device)
     return uy_star, a_P_t
 
 
 def _build_pressure_system(
     a_ux: Tensor, a_uy: Tensor, dx: float, dy: float, nx: int, ny: int
 ):
-    """Build SIMPLE pressure correction Laplacian with a_P-weighted face coefficients.
-
-    SIMPLE: pressure correction equation is
-        -∂/∂x[(1/a_P_u) ∂p'/∂x] - ∂/∂y[(1/a_P_v) ∂p'/∂y] = ∇·u*
-
-    The coefficient at interior x-face (j, i+1) is 1/(a_P_u[j, i]).
-    At boundary faces (x=0, x=Lx, y=0, y=Ly), coefficient = 0 (Neumann → no flux).
-    """
-    a_ux_np = a_ux.detach().numpy()   # (ny, nx-1)
-    a_uy_np = a_uy.detach().numpy()   # (ny-1, nx)
-
-    n = nx * ny
-    # Pin at a cell in the top-right region (away from inlet/corners)
-    # to remove the rank-1 null space
-    pin_idx = (ny // 2) * nx + (nx - 1)
-    rows, cols, vals = [], [], []
-
-    for j in range(ny):
-        for i in range(nx):
-            k = j * nx + i
-            if k == pin_idx:
-                rows.append(k); cols.append(k); vals.append(1.0)
-                continue
-
-            d = 0.0
-
-            # East face: x-face at column i+1 (interior x-face ii=i, physical col i+1)
-            if i + 1 < nx:
-                c_e = dy / (a_ux_np[j, i] * dx ** 2 + 1e-30)
-                rows.append(k); cols.append(k + 1); vals.append(-c_e)
-                d += c_e
-            # West face: x-face at column i (interior x-face ii=i-1)
-            if i - 1 >= 0:
-                c_w = dy / (a_ux_np[j, i - 1] * dx ** 2 + 1e-30)
-                rows.append(k); cols.append(k - 1); vals.append(-c_w)
-                d += c_w
-            # North face: y-face at row j+1 (interior y-face jj=j)
-            if j + 1 < ny:
-                c_n = dx / (a_uy_np[j, i] * dy ** 2 + 1e-30)
-                rows.append(k); cols.append(k + nx); vals.append(-c_n)
-                d += c_n
-            # South face: y-face at row j (interior y-face jj=j-1)
-            if j - 1 >= 0:
-                c_s = dx / (a_uy_np[j - 1, i] * dy ** 2 + 1e-30)
-                rows.append(k); cols.append(k - nx); vals.append(-c_s)
-                d += c_s
-
-            rows.append(k); cols.append(k); vals.append(d)
-
-    L = sp.csr_matrix(
-        (np.array(vals, dtype=np.float64),
-         (np.array(rows, dtype=np.int32), np.array(cols, dtype=np.int32))),
-        shape=(n, n)
+    """Build SIMPLE pressure correction Laplacian (Rust-accelerated)."""
+    indptr, indices, data, pin_idx = _rust_build_p(
+        a_ux.detach().numpy().astype(np.float64),
+        a_uy.detach().numpy().astype(np.float64),
+        float(dx), float(dy), nx, ny,
     )
+    n = nx * ny
+    L = sp.csr_matrix((data, indices, indptr), shape=(n, n))
     return L, pin_idx
 
 
