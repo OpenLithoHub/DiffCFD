@@ -1,4 +1,4 @@
-"""Differentiable neural surrogate for supercritical CO₂ transcritical properties (C4).
+"""Differentiable neural surrogate for supercritical CO2 transcritical properties (C4).
 
 Provides density, viscosity, thermal conductivity, and specific heat as
 differentiable functions of (T, p) in the transcritical region.
@@ -8,14 +8,19 @@ Physical consistency enforced by architecture:
   - Positive cp via softplus output
   - Positive viscosity/conductivity via softplus output
 
-Training target: NIST REFPROP data in transcritical region (0.9 Tc – 1.1 Tc).
+Training target: NIST REFPROP data in transcritical region (0.9 Tc - 1.1 Tc).
 
-CO₂ critical point: Tc = 304.13 K, Pc = 7.377 MPa.
+CO2 critical point: Tc = 304.13 K, Pc = 7.377 MPa.
 
 Phase envelope detection borrowed from sCO2-TMSR-Toolkit's
-``classify_point()`` — classifies thermodynamic states into OK / TWO_PHASE /
+``classify_point()`` -- classifies thermodynamic states into OK / TWO_PHASE /
 NEAR_CRITICAL / SOLVER_FAILED so the surrogate can avoid unreliable
 extrapolation near phase boundaries.
+
+D.4: ``CoolPropPropertySurrogate`` wraps the sCO2-TMSR-Toolkit's
+``PropertySurrogate`` architecture (trained on actual CoolProp/NIST REFPROP
+data) with monotonicity and positivity constraints, providing higher accuracy
+than the simplified Peng-Robinson EOS used by ``SCO2Surrogate``.
 """
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ from torch import Tensor
 
 from diffcfd.props.ideal_gas import ThermophysicalProps
 
-# CO₂ critical point constants
+# CO2 critical point constants
 TC = 304.13  # K
 PC = 7.377e6  # Pa (7.377 MPa)
 
@@ -290,3 +295,146 @@ def train_sco2_surrogate(
 
     model._trained = True
     return model
+
+
+# ---------------------------------------------------------------------------
+# D.4: CoolProp-trained surrogate (from sCO2-TMSR-Toolkit PropertySurrogate)
+# ---------------------------------------------------------------------------
+
+class CoolPropPropertySurrogate(nn.Module, ThermophysicalProps):
+    """sCO2 surrogate trained on actual CoolProp/NIST REFPROP data.
+
+    Wraps the sCO2-TMSR-Toolkit's ``PropertySurrogate`` MLP architecture with
+    monotonicity (density) and positivity (viscosity, conductivity, cp)
+    constraints via softplus outputs. Uses data-driven normalization statistics
+    learned from CoolProp rather than the fixed critical-point-relative
+    normalization in ``SCO2Surrogate``.
+
+    The key difference from ``SCO2Surrogate``:
+    - ``SCO2Surrogate`` was trained on simplified Peng-Robinson EOS synthetic data
+    - ``CoolPropPropertySurrogate`` loads weights trained on actual CoolProp
+      PropsSI calls (NIST REFPROP backend), providing higher fidelity near the
+      pseudo-critical line and in the supercritical region.
+
+    Can be loaded from a sCO2-TMSR-Toolkit ``PropertySurrogate.state_dict()``
+    via the ``from_coolprop_surrogate()`` class method.
+
+    Args:
+        hidden_dim: Hidden layer width for each property MLP.
+        device: PyTorch device for tensors and networks.
+    """
+
+    def __init__(self, hidden_dim: int = 64, device: str = "cpu") -> None:
+        nn.Module.__init__(self)
+        self._device = torch.device(device)
+        self._hidden_dim = hidden_dim
+        self._trained = False
+
+        # Normalization stats — populated during load or training
+        self.register_buffer("_T_mean", torch.tensor(TC))
+        self.register_buffer("_T_std", torch.tensor(0.2 * TC))
+        self.register_buffer("_P_mean", torch.tensor(PC))
+        self.register_buffer("_P_std", torch.tensor(0.5 * PC))
+
+        # Per-property output stats for denormalization
+        self._stats: dict[str, dict[str, float]] = {}
+
+        in_dim = 2
+        self._density_net = _MonotoneMLP(in_dim, hidden_dim, 1)
+        self._viscosity_net = _PositiveOutputMLP(in_dim, hidden_dim, 1)
+        self._conductivity_net = _PositiveOutputMLP(in_dim, hidden_dim, 1)
+        self._cp_net = _PositiveOutputMLP(in_dim, hidden_dim, 1)
+
+    def _normalize(self, T: Tensor, p: Tensor) -> Tensor:
+        """Normalize (T, p) to zero-mean, unit-scale from training data stats."""
+        T_n = (T - self._T_mean) / self._T_std
+        p_n = (p - self._P_mean) / self._P_std
+        return torch.stack([T_n, p_n], dim=-1)
+
+    def _denormalize(self, name: str, raw: Tensor) -> Tensor:
+        """Convert normalized network output back to physical units."""
+        if name not in self._stats:
+            # Fallback: return raw (for untrained / partially loaded models)
+            return raw
+        s = self._stats[name]
+        return raw * s["std"] + s["mean"]
+
+    def density(self, T: Tensor, p: Tensor) -> Tensor:
+        """Density rho [kg/m3]. Monotone via _MonotoneMLP architecture."""
+        x = self._normalize(T, p)
+        raw = self._density_net(x).squeeze(-1)
+        return self._denormalize("density", raw)
+
+    def viscosity(self, T: Tensor, p: Tensor) -> Tensor:
+        """Dynamic viscosity mu [Pa*s]. Positive via softplus."""
+        x = self._normalize(T, p)
+        raw = self._viscosity_net(x).squeeze(-1)
+        return self._denormalize("viscosity", raw)
+
+    def conductivity(self, T: Tensor, p: Tensor) -> Tensor:
+        """Thermal conductivity k [W/(m*K)]. Positive via softplus."""
+        x = self._normalize(T, p)
+        raw = self._conductivity_net(x).squeeze(-1)
+        return self._denormalize("conductivity", raw)
+
+    def specific_heat(self, T: Tensor, p: Tensor) -> Tensor:
+        """Isobaric specific heat cp [J/(kg*K)]. Positive via softplus."""
+        x = self._normalize(T, p)
+        raw = self._cp_net(x).squeeze(-1)
+        return self._denormalize("specific_heat", raw)
+
+    @classmethod
+    def from_coolprop_surrogate(cls, state: dict, hidden_dim: int = 64, device: str = "cpu") -> "CoolPropPropertySurrogate":
+        """Load from a sCO2-TMSR-Toolkit ``PropertySurrogate.state_dict()``.
+
+        The sCO2-TMSR-Toolkit's ``PropertySurrogate`` trains 4 MLPs on actual
+        CoolProp PropsSI data and serializes the network weights, normalization
+        stats, and output denormalization stats in its ``state_dict()``. This
+        method creates a ``CoolPropPropertySurrogate`` and loads those weights,
+        providing a drop-in ``ThermophysicalProps``-compatible wrapper.
+
+        Args:
+            state: State dict from ``PropertySurrogate.state_dict()``.
+            hidden_dim: Must match the hidden_dim used during training.
+            device: Target device.
+
+        Returns:
+            Loaded CoolPropPropertySurrogate with trained weights.
+        """
+        model = cls(hidden_dim=hidden_dim, device=device)
+        model.to(device)
+
+        # Load network weights (matching sCO2-TMSR-Toolkit state_dict keys)
+        model._density_net.load_state_dict(state["density_net"])
+        model._viscosity_net.load_state_dict(state["viscosity_net"])
+        model._conductivity_net.load_state_dict(state["conductivity_net"])
+        model._cp_net.load_state_dict(state["cp_net"])
+
+        # Load normalization stats
+        model._T_mean = torch.tensor(state["T_mean"], device=device)
+        model._T_std = torch.tensor(state["T_std"], device=device)
+        model._P_mean = torch.tensor(state["P_mean"], device=device)
+        model._P_std = torch.tensor(state["P_std"], device=device)
+
+        # Load output denormalization stats
+        if "stats" in state:
+            model._stats = state["stats"]
+
+        model._trained = True
+        return model
+
+    def state_dict_export(self) -> dict:
+        """Export state in sCO2-TMSR-Toolkit ``PropertySurrogate`` format."""
+        return {
+            "density_net": self._density_net.state_dict(),
+            "viscosity_net": self._viscosity_net.state_dict(),
+            "conductivity_net": self._conductivity_net.state_dict(),
+            "cp_net": self._cp_net.state_dict(),
+            "stats": self._stats,
+            "T_mean": float(self._T_mean),
+            "T_std": float(self._T_std),
+            "P_mean": float(self._P_mean),
+            "P_std": float(self._P_std),
+            "hidden_dim": self._hidden_dim,
+            "trained": self._trained,
+        }
