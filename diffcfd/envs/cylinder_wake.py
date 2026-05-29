@@ -9,7 +9,6 @@ Benchmark: APG vs SB3 PPO on Rabault et al. 2019 wake suppression task.
 
 from __future__ import annotations
 
-from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -17,7 +16,6 @@ import torch
 from torch import Tensor
 
 from diffcfd.envs.base import DiffCFDEnv
-from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.geometry.shapes import cylinder_sdf
 from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 

@@ -1,11 +1,11 @@
 """Tests for sCO₂ property surrogate (C4)."""
 
-import pytest
 import torch
 
 
 def test_sco2_import():
     from diffcfd.props.sco2 import SCO2Surrogate
+
     assert SCO2Surrogate is not None
 
 
@@ -47,9 +47,7 @@ def test_sco2_differentiable():
 def test_sco2_training_runs():
     from diffcfd.props.sco2 import train_sco2_surrogate
 
-    model = train_sco2_surrogate(
-        hidden_dim=16, epochs=5, n_samples=100, verbose=False
-    )
+    model = train_sco2_surrogate(hidden_dim=16, epochs=5, n_samples=100, verbose=False)
     assert model._trained
 
     T = torch.tensor([304.0])

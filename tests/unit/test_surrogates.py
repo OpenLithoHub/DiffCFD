@@ -1,11 +1,11 @@
 """Tests for FNO surrogate (v0.5)."""
 
-import pytest
 import torch
 
 
 def test_fno_import():
     from diffcfd.surrogates.fno import FNO2D
+
     assert FNO2D is not None
 
 

@@ -151,7 +151,7 @@ def optimize_topology(
 
         # Volume constraint penalty: penalize deviation from target fluid fraction
         vol_error = chi.mean() - volume_fraction
-        vol_penalty = volume_penalty * vol_error ** 2
+        vol_penalty = volume_penalty * vol_error**2
 
         # Total variation regularisation (borrowed from OpenLithoHub ILT)
         tv_loss = total_variation(chi) * tv_weight if tv_weight > 0 else 0.0
@@ -160,10 +160,10 @@ def optimize_topology(
         sdf_approx = 2.0 * chi - 1.0
 
         # Solve NS with Brinkman penalization
-        u_inlet = torch.tensor(
-            inlet_velocity, dtype=torch.float32, device=device
+        u_inlet = torch.tensor(inlet_velocity, dtype=torch.float32, device=device)
+        ux, uy, p = solver.solve_steady(
+            sdf=sdf_approx, inlet_velocity=u_inlet, case="channel"
         )
-        ux, uy, p = solver.solve_steady(sdf=sdf_approx, inlet_velocity=u_inlet, case="channel")
 
         # Objective: minimize pressure drop
         dp = solver.pressure_drop(ux, uy, p)
@@ -187,6 +187,7 @@ def optimize_topology(
         # Convergence monitoring (B.1)
         if convergence_monitor is not None:
             from diff_surrogate.convergence import ConvergenceAction
+
             action = convergence_monitor.update(dp.abs().item(), step)
             if action == ConvergenceAction.EARLY_STOP:
                 if verbose:
@@ -196,7 +197,9 @@ def optimize_topology(
                 for pg in optimizer.param_groups:
                     pg["lr"] *= 0.5
                 if verbose:
-                    print(f"  >> Convergence: reducing LR to {optimizer.param_groups[0]['lr']:.6f}")
+                    print(
+                        f"  >> Convergence: reducing LR to {optimizer.param_groups[0]['lr']:.6f}"
+                    )
 
     return {
         "history": history,
@@ -212,6 +215,7 @@ def optimize_topology(
 # Multi-corner robust topology optimization (B.3)
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CornerSpec:
     """One operating-point corner in the multi-corner optimization sweep.
@@ -226,6 +230,7 @@ class CornerSpec:
             this corner's performance matters more.
         label: Human-readable label for logging.
     """
+
     reynolds: float
     weight: float = 1.0
     label: str = ""
@@ -255,8 +260,12 @@ def _solve_corner_loss(
     Returns:
         Scalar loss tensor with autograd connection to sdf_approx.
     """
-    u_inlet = torch.tensor(inlet_velocity, dtype=torch.float32, device=sdf_approx.device)
-    ux, uy, p = solver.solve_steady(sdf=sdf_approx, inlet_velocity=u_inlet, case="channel")
+    u_inlet = torch.tensor(
+        inlet_velocity, dtype=torch.float32, device=sdf_approx.device
+    )
+    ux, uy, p = solver.solve_steady(
+        sdf=sdf_approx, inlet_velocity=u_inlet, case="channel"
+    )
 
     if objective == "pressure_drop":
         return solver.pressure_drop(ux, uy, p).abs()
@@ -362,7 +371,6 @@ def multi_corner_optimize(
         label = corner.label or f"Re{corner.reynolds:.0f}"
         history[label] = []
 
-    converged_early = False
     convergence_info: dict = {}
 
     for step in range(n_steps):
@@ -386,7 +394,7 @@ def multi_corner_optimize(
 
         # Volume constraint penalty
         vol_error = chi.mean() - volume_fraction
-        vol_penalty = volume_penalty * vol_error ** 2
+        vol_penalty = volume_penalty * vol_error**2
 
         # Total variation regularisation
         tv_loss = total_variation(chi) * tv_weight if tv_weight > 0 else 0.0
@@ -398,7 +406,10 @@ def multi_corner_optimize(
         combined_loss = rho.new_zeros(())
         for i, corner in enumerate(corners):
             corner_loss = _solve_corner_loss(
-                solvers[i], sdf_approx, inlet_velocity, objective,
+                solvers[i],
+                sdf_approx,
+                inlet_velocity,
+                objective,
             )
             combined_loss = combined_loss + corner.weight * corner_loss
             label = corner.label or f"Re{corner.reynolds:.0f}"
@@ -430,9 +441,9 @@ def multi_corner_optimize(
         # Convergence monitoring
         if convergence_monitor is not None:
             from diff_surrogate.convergence import ConvergenceAction
+
             action = convergence_monitor.update(combined_loss.item(), step)
             if action == ConvergenceAction.EARLY_STOP:
-                converged_early = True
                 convergence_info = {
                     "early_stopped": True,
                     "step": step,
@@ -445,7 +456,9 @@ def multi_corner_optimize(
                 for pg in optimizer.param_groups:
                     pg["lr"] *= 0.5
                 if verbose:
-                    print(f"  >> Convergence: reducing LR to {optimizer.param_groups[0]['lr']:.6f}")
+                    print(
+                        f"  >> Convergence: reducing LR to {optimizer.param_groups[0]['lr']:.6f}"
+                    )
 
     result = {
         "history": history,

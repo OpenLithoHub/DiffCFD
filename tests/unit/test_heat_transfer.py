@@ -5,7 +5,8 @@ import torch
 
 
 def test_heat_transfer_import():
-    from diffcfd.solvers.heat_transfer import HeatTransfer2D, coupled_steady_solve
+    from diffcfd.solvers.heat_transfer import HeatTransfer2D
+
     assert HeatTransfer2D is not None
 
 

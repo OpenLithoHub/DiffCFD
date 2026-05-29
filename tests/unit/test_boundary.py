@@ -1,16 +1,17 @@
 """Unit tests for boundary condition implementations."""
 
-import pytest
 import torch
 
 
 def test_boundary_import():
     from diffcfd.solvers.boundary import BoundaryConditions
+
     assert BoundaryConditions is not None
 
 
 def test_boundary_apply_inlet(small_mesh):
     from diffcfd.solvers.boundary import BoundaryConditions
+
     bc = BoundaryConditions(small_mesh)
     ny, nx = small_mesh.ny, small_mesh.nx
     ux = torch.zeros(ny, nx + 1)
@@ -21,6 +22,7 @@ def test_boundary_apply_inlet(small_mesh):
 
 def test_boundary_no_slip(small_mesh):
     from diffcfd.solvers.boundary import BoundaryConditions
+
     bc = BoundaryConditions(small_mesh)
     ny, nx = small_mesh.ny, small_mesh.nx
     ux = torch.ones(ny, nx + 1)

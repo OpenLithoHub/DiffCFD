@@ -17,7 +17,6 @@ import torch
 from torch import Tensor
 
 from diffcfd.geometry.mesh import CartesianMesh
-from diffcfd.geometry.shapes import cylinder_sdf
 from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 from diffcfd.solvers.heat_transfer import HeatTransfer2D, coupled_steady_solve
 

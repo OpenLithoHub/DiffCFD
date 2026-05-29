@@ -1,11 +1,11 @@
 """Tests for PCHE optimization workflow (v0.6)."""
 
-import pytest
 import torch
 
 
 def test_pche_import():
     from diffcfd.workflows.pche import optimize_pche
+
     assert optimize_pche is not None
 
 
@@ -29,7 +29,8 @@ def test_pche_optimize_runs():
     result = optimize_pche(
         n_channels=2,
         grid=(16, 12),
-        lx=0.5, ly=0.3,
+        lx=0.5,
+        ly=0.3,
         channel_radius=0.02,
         re=100.0,
         n_steps=2,

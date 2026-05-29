@@ -9,7 +9,6 @@ Acceptance gate (v0.1): converge within 200 iterations at Re=1000.
 
 from __future__ import annotations
 
-import math
 from typing import Callable
 
 import numpy as np

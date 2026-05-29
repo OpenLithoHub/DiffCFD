@@ -145,7 +145,10 @@ class SimpleSurrogate:
 
     @staticmethod
     def _mac_to_cell_centre(
-        ux: Tensor, uy: Tensor, ny: int, nx: int,
+        ux: Tensor,
+        uy: Tensor,
+        ny: int,
+        nx: int,
     ) -> tuple[Tensor, Tensor]:
         """Interpolate MAC velocities to cell-centre (ny, nx) grid.
 
@@ -164,9 +167,9 @@ class SimpleSurrogate:
             Cell-centred velocities, each shape (ny, nx).
         """
         # Average left/right face values at each cell
-        ux_cc = 0.5 * (ux[:, :-1] + ux[:, 1:])   # (ny, nx)
+        ux_cc = 0.5 * (ux[:, :-1] + ux[:, 1:])  # (ny, nx)
         # Average bottom/top face values at each cell
-        uy_cc = 0.5 * (uy[:-1, :] + uy[1:, :])    # (ny, nx)
+        uy_cc = 0.5 * (uy[:-1, :] + uy[1:, :])  # (ny, nx)
         return ux_cc, uy_cc
 
     # ------------------------------------------------------------------
@@ -286,10 +289,7 @@ class SimpleSurrogate:
             loss_history.append(avg_loss)
 
             if verbose and (epoch % 10 == 0 or epoch == n_epochs - 1):
-                print(
-                    f"Epoch {epoch:4d}/{n_epochs}: "
-                    f"loss={avg_loss:.6f}"
-                )
+                print(f"Epoch {epoch:4d}/{n_epochs}: loss={avg_loss:.6f}")
 
         self._trained = True
         self.net.eval()
@@ -330,7 +330,9 @@ class SimpleSurrogate:
         self._stats.total_predictions += 1
 
         # Periodic full-solver correction via CorrectionPolicy
-        if not self._trained or self._correction_policy.should_correct(self._forward_count):
+        if not self._trained or self._correction_policy.should_correct(
+            self._forward_count
+        ):
             self._stats.total_corrections += 1
             return self._full_solve(design, inlet_velocity, case)
 

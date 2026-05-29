@@ -41,7 +41,6 @@ from torch import Tensor
 
 from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.solvers.boundary import BoundaryConditions
-from diffcfd.solvers.implicit_diff import fixed_point_gradient
 
 
 class _SteadyStateNS(torch.autograd.Function):

@@ -3,10 +3,11 @@
 Runs all validation cases, gradient checks, and performance benchmarks.
 Reports timing and accuracy metrics for paper preparation.
 """
+
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import torch
 
@@ -61,8 +62,10 @@ def _bench_lid_cavity(re: int, grid: int) -> BenchmarkResult:
 
         t0 = time.time()
         solver = NavierStokes2D(
-            reynolds_number=re, grid=(grid, grid),
-            max_iter=3000, tol=1e-5,
+            reynolds_number=re,
+            grid=(grid, grid),
+            max_iter=3000,
+            tol=1e-5,
         )
         ux, uy, p = solver.solve_steady(lid_velocity=1.0, case="cavity")
         r.time_s = time.time() - t0
@@ -91,19 +94,35 @@ def _bench_poiseuille_gradient() -> BenchmarkResult:
         # FD reference
         eps = 0.01
         solver_fd = NavierStokes2D(
-            reynolds_number=1.0, grid=(32, 16),
-            lx=4.0, ly=1.0, tol=1e-8,
+            reynolds_number=1.0,
+            grid=(32, 16),
+            lx=4.0,
+            ly=1.0,
+            tol=1e-8,
         )
-        ux_p, uy_p, p_p = solver_fd._run_simple(None, inlet_velocity=1.0 + eps, case="channel")
-        ux_m, uy_m, p_m = solver_fd._run_simple(None, inlet_velocity=1.0 - eps, case="channel")
-        fd_grad = float((solver_fd.pressure_drop(ux_p, uy_p, p_p) - solver_fd.pressure_drop(ux_m, uy_m, p_m)) / (2 * eps))
+        ux_p, uy_p, p_p = solver_fd._run_simple(
+            None, inlet_velocity=1.0 + eps, case="channel"
+        )
+        ux_m, uy_m, p_m = solver_fd._run_simple(
+            None, inlet_velocity=1.0 - eps, case="channel"
+        )
+        fd_grad = float(
+            (
+                solver_fd.pressure_drop(ux_p, uy_p, p_p)
+                - solver_fd.pressure_drop(ux_m, uy_m, p_m)
+            )
+            / (2 * eps)
+        )
 
         # Implicit diff
         solver = NavierStokes2D(
-            reynolds_number=1.0, grid=(32, 16),
-            lx=4.0, ly=1.0,
+            reynolds_number=1.0,
+            grid=(32, 16),
+            lx=4.0,
+            ly=1.0,
             backward="implicit_diff",
-            max_iter=2000, tol=1e-8,
+            max_iter=2000,
+            tol=1e-8,
         )
         u_inlet = torch.tensor(1.0, requires_grad=True)
         ux, uy, p = solver.solve_steady(inlet_velocity=u_inlet, case="channel")
@@ -127,16 +146,17 @@ def _bench_gradcheck() -> BenchmarkResult:
 
         t0 = time.time()
         solver = NavierStokes2D(
-            reynolds_number=1.0, grid=(8, 4),
-            lx=2.0, ly=1.0,
+            reynolds_number=1.0,
+            grid=(8, 4),
+            lx=2.0,
+            ly=1.0,
             backward="implicit_diff",
-            max_iter=500, tol=1e-4,
+            max_iter=500,
+            tol=1e-4,
         )
 
         def fn(u_in):
-            ux, uy, p = solver.solve_steady(
-                inlet_velocity=u_in, case="channel"
-            )
+            ux, uy, p = solver.solve_steady(inlet_velocity=u_in, case="channel")
             return solver.pressure_drop(ux, uy, p).unsqueeze(0)
 
         u = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
@@ -163,7 +183,9 @@ def _bench_conduction_nu() -> BenchmarkResult:
         uy = torch.zeros(17, 16)
         T = ht.solve_differentiable(ux, uy)
 
-        Nu = ht.nusselt_number(T, T_hot=1.0, T_cold=0.0, L=1.0, wall="bottom", T_wall=0.0)
+        Nu = ht.nusselt_number(
+            T, T_hot=1.0, T_cold=0.0, L=1.0, wall="bottom", T_wall=0.0
+        )
         r.value = abs(Nu.item() - 1.0)
         r.status = "pass" if r.value < r.target else "fail"
         r.time_s = time.time() - t0
@@ -180,14 +202,15 @@ def _bench_turbulent_channel() -> BenchmarkResult:
         from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 
         t0 = time.time()
-        fev = FrozenEddyViscosity.from_blasius(
-            Re=10000, ny=16, nx=32, ly=1.0
-        )
+        fev = FrozenEddyViscosity.from_blasius(Re=10000, ny=16, nx=32, ly=1.0)
         solver = NavierStokes2D(
-            reynolds_number=10000, grid=(32, 16),
-            lx=4.0, ly=1.0,
+            reynolds_number=10000,
+            grid=(32, 16),
+            lx=4.0,
+            ly=1.0,
             turbulence=fev,
-            max_iter=1000, tol=1e-4,
+            max_iter=1000,
+            tol=1e-4,
         )
         ux, uy, p = solver.solve_steady(inlet_velocity=1.0, case="channel")
         r.status = "pass" if torch.isfinite(ux).all() else "fail"
@@ -223,9 +246,12 @@ def _bench_airfoil() -> BenchmarkResult:
         t0 = time.time()
         airfoil = NACA4Digit(chord=1.0)
         from diffcfd.geometry.mesh import CartesianMesh
+
         mesh = CartesianMesh(32, 32, lx=2.0, ly=2.0)
         sdf = airfoil.sdf(mesh)
-        r.status = "pass" if sdf.shape == (32, 32) and torch.isfinite(sdf).all() else "fail"
+        r.status = (
+            "pass" if sdf.shape == (32, 32) and torch.isfinite(sdf).all() else "fail"
+        )
         r.time_s = time.time() - t0
     except Exception as e:
         r.status = "fail"
@@ -240,7 +266,9 @@ def _bench_topology() -> BenchmarkResult:
 
         t0 = time.time()
         result = optimize_topology(
-            grid=(16, 8), n_steps=2, verbose=False,
+            grid=(16, 8),
+            n_steps=2,
+            verbose=False,
         )
         r.status = "pass" if len(result["history"]["objective"]) == 2 else "fail"
         r.time_s = time.time() - t0

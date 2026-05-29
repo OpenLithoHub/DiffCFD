@@ -9,7 +9,6 @@ import pathlib
 
 import numpy as np
 import pytest
-import torch
 from scipy.interpolate import interp1d
 
 
@@ -18,7 +17,7 @@ GHIA_DIR = pathlib.Path(__file__).parent / "ghia1982"
 
 def _load_ghia(filename):
     data = np.loadtxt(GHIA_DIR / filename, delimiter=",", skiprows=1)
-    return data[:, 0], data[:, 1]   # y, u
+    return data[:, 0], data[:, 1]  # y, u
 
 
 def _l2_error(solver_ux, ny, ghia_y, ghia_u):
@@ -36,12 +35,19 @@ def test_lid_driven_cavity_re100():
     y_ref, u_ref = _load_ghia("re100_u.csv")
     nx = ny = 64
     solver = NavierStokes2D(
-        reynolds_number=100, grid=(nx, ny), device="cpu",
-        max_iter=2000, tol=1e-5, alpha_u=0.7, alpha_p=0.3,
+        reynolds_number=100,
+        grid=(nx, ny),
+        device="cpu",
+        max_iter=2000,
+        tol=1e-5,
+        alpha_u=0.7,
+        alpha_p=0.3,
     )
-    ux, uy, p = solver.solve_steady(sdf=None, inlet_velocity=0.0, lid_velocity=1.0, case="cavity")
+    ux, uy, p = solver.solve_steady(
+        sdf=None, inlet_velocity=0.0, lid_velocity=1.0, case="cavity"
+    )
     l2 = _l2_error(ux, ny, y_ref, u_ref)
-    assert l2 < 0.01, f"Re=100 L2 error {l2*100:.2f}% exceeds 1% gate"
+    assert l2 < 0.01, f"Re=100 L2 error {l2 * 100:.2f}% exceeds 1% gate"
 
 
 @pytest.mark.slow
@@ -52,9 +58,16 @@ def test_lid_driven_cavity_re1000():
     y_ref, u_ref = _load_ghia("re1000_u.csv")
     nx = ny = 128
     solver = NavierStokes2D(
-        reynolds_number=1000, grid=(nx, ny), device="cpu",
-        max_iter=3000, tol=1e-5, alpha_u=0.5, alpha_p=0.1,
+        reynolds_number=1000,
+        grid=(nx, ny),
+        device="cpu",
+        max_iter=3000,
+        tol=1e-5,
+        alpha_u=0.5,
+        alpha_p=0.1,
     )
-    ux, uy, p = solver.solve_steady(sdf=None, inlet_velocity=0.0, lid_velocity=1.0, case="cavity")
+    ux, uy, p = solver.solve_steady(
+        sdf=None, inlet_velocity=0.0, lid_velocity=1.0, case="cavity"
+    )
     l2 = _l2_error(ux, ny, y_ref, u_ref)
-    assert l2 < 0.02, f"Re=1000 L2 error {l2*100:.2f}% exceeds 2% gate"
+    assert l2 < 0.02, f"Re=1000 L2 error {l2 * 100:.2f}% exceeds 2% gate"

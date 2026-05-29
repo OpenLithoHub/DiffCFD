@@ -31,17 +31,19 @@ def test_poiseuille_forward(poiseuille_params):
         lx=p["lx"],
         ly=p["ly"],
     )
-    ux, uy, pf = solver.solve_steady(sdf=None, inlet_velocity=p["u_inlet"], case="channel")
+    ux, uy, pf = solver.solve_steady(
+        sdf=None, inlet_velocity=p["u_inlet"], case="channel"
+    )
 
     ny = p["grid"][1]
     ly = p["ly"]
     dy = ly / ny
-    h_eff = (ny - 1) * dy   # wall-to-wall distance on the MAC grid
+    h_eff = (ny - 1) * dy  # wall-to-wall distance on the MAC grid
     y = torch.arange(ny, dtype=torch.float32) * dy
 
     u_outlet = ux[:, -1]
-    Q = (u_outlet[1:-1].sum() * dy).item()   # mass flow rate per unit width
-    U_mean = Q / h_eff                        # bulk mean velocity
+    Q = (u_outlet[1:-1].sum() * dy).item()  # mass flow rate per unit width
+    U_mean = Q / h_eff  # bulk mean velocity
 
     # Fully-developed parabolic profile: u(y) = 6*U_mean*(y/h_eff)*(1-y/h_eff)
     u_analytical = 6.0 * U_mean * (y / h_eff) * (1.0 - y / h_eff)
@@ -70,9 +72,7 @@ def test_poiseuille_gradient(poiseuille_params):
     # FD reference: eps=0.01 avoids both floating-point noise (too small eps)
     # and nonlinear effects (too large eps) for Re=1 Stokes flow
     eps = 0.01
-    solver_fd = NavierStokes2D(
-        reynolds_number=re, grid=grid, lx=lx, ly=ly, tol=1e-8
-    )
+    solver_fd = NavierStokes2D(reynolds_number=re, grid=grid, lx=lx, ly=ly, tol=1e-8)
     ux_p, uy_p, p_p = solver_fd._run_simple(
         None, inlet_velocity=u_inlet_val + eps, case="channel"
     )
@@ -88,7 +88,9 @@ def test_poiseuille_gradient(poiseuille_params):
     solver_id = NavierStokes2D(
         reynolds_number=re, grid=grid, lx=lx, ly=ly, backward="implicit_diff", tol=1e-8
     )
-    ux, uy, pf = solver_id.solve_steady(sdf=None, inlet_velocity=u_inlet, case="channel")
+    ux, uy, pf = solver_id.solve_steady(
+        sdf=None, inlet_velocity=u_inlet, case="channel"
+    )
     dp = solver_id.pressure_drop(ux, uy, pf)
     dp.backward()
 

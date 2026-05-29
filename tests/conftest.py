@@ -1,7 +1,6 @@
 """Shared pytest fixtures for DiffCFD tests."""
 
 import pytest
-import torch
 
 from diffcfd.geometry.mesh import CartesianMesh
 

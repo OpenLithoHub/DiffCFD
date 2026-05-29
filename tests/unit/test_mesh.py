@@ -1,7 +1,5 @@
 """Unit tests for CartesianMesh."""
 
-import torch
-
 
 def test_mesh_dimensions(small_mesh):
     assert small_mesh.nx == 8

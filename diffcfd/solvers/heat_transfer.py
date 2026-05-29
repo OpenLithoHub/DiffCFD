@@ -22,7 +22,6 @@ import torch
 from torch import Tensor
 
 from diffcfd.geometry.mesh import CartesianMesh
-from diffcfd.solvers.boundary import BoundaryConditions
 
 
 class HeatTransfer2D:

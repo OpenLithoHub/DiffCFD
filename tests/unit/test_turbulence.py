@@ -1,11 +1,11 @@
 """Tests for frozen eddy viscosity turbulence model."""
 
-import pytest
 import torch
 
 
 def test_turbulence_import():
     from diffcfd.solvers.turbulence import FrozenEddyViscosity
+
     assert FrozenEddyViscosity is not None
 
 
@@ -60,7 +60,10 @@ def test_turbulence_in_ns_solver():
         ny=16, nx=32, ly=1.0, u_tau=0.05, nu=1e-3
     )
     solver = NavierStokes2D(
-        reynolds_number=1000, grid=(32, 16), lx=4.0, ly=1.0,
+        reynolds_number=1000,
+        grid=(32, 16),
+        lx=4.0,
+        ly=1.0,
         turbulence=mu_t,
     )
     assert solver._nu_field is not None

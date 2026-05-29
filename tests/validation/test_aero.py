@@ -1,7 +1,6 @@
 """Validation test for aerodynamic shape optimization workflow."""
 
 import pytest
-import torch
 
 
 @pytest.mark.slow
@@ -17,8 +16,13 @@ def test_airfoil_forces_nonzero():
     mesh = CartesianMesh(nx, ny, lx=lx, ly=ly)
 
     solver = NavierStokes2D(
-        reynolds_number=100, grid=(nx, ny), lx=lx, ly=ly,
-        backward="implicit_diff", max_iter=1000, tol=1e-5,
+        reynolds_number=100,
+        grid=(nx, ny),
+        lx=lx,
+        ly=ly,
+        backward="implicit_diff",
+        max_iter=1000,
+        tol=1e-5,
     )
 
     naca = NACA4Digit(chord=0.4, leading_edge_x=0.5, center_y=0.5, angle_deg=5.0)

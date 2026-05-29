@@ -3,7 +3,6 @@
 import math
 
 import pytest
-import torch
 
 
 @pytest.mark.slow
@@ -29,18 +28,21 @@ def test_mixing_length_profile():
     # Check 1: peak is near channel center
     center_j = ny // 2
     peak_j = mu_t[:, 0].argmax().item()
-    assert abs(peak_j - center_j) <= 2, \
+    assert abs(peak_j - center_j) <= 2, (
         f"Peak mu_t at row {peak_j}, expected near {center_j}"
+    )
 
     # Check 2: near-wall mu_t is much smaller than center (viscous sublayer)
     wall_ratio = mu_t[1, 0].item() / mu_t[center_j, 0].item()
-    assert wall_ratio < 0.1, \
+    assert wall_ratio < 0.1, (
         f"Near-wall mu_t/center mu_t = {wall_ratio:.3f}, should be < 0.1"
+    )
 
     # Check 3: mu_t/nu at center should be O(100-500) for Re=10000
     ratio = mu_t[center_j, 0].item() / nu
-    assert 50 < ratio < 1000, \
+    assert 50 < ratio < 1000, (
         f"mu_t/nu at center = {ratio:.1f}, expected O(100-500) for Re=10000"
+    )
 
     # Check 4: Blasius friction velocity matches expected value
     f_expected = 0.316 * Re ** (-0.25)
@@ -85,7 +87,7 @@ def test_turbulent_friction_factor():
     # For 2D channel: D_h = 2*h, so f = 2 * dp/dx * 2 / 1 = 4 * dp/dx / (1/Lx)
     dp = solver.pressure_drop(ux, uy, p).item()
     dp_dx = dp / lx
-    f_computed = 2.0 * dp_dx * 2.0 * ly / (1.0 ** 2)
+    f_computed = 2.0 * dp_dx * 2.0 * ly / (1.0**2)
 
     # Compare with Blasius correlation for the effective Re
     f_blasius_eff = 0.316 * Re_eff ** (-0.25)
@@ -93,8 +95,10 @@ def test_turbulent_friction_factor():
     # The solver with averaged nu_eff should give a friction factor close to
     # the Blasius value at that effective Re
     rel_error = abs(f_computed - f_blasius_eff) / f_blasius_eff
-    print(f"Re_eff = {Re_eff:.1f}, f_computed = {f_computed:.6f}, "
-          f"f_blasius(Re_eff) = {f_blasius_eff:.6f}, error = {rel_error * 100:.1f}%")
+    print(
+        f"Re_eff = {Re_eff:.1f}, f_computed = {f_computed:.6f}, "
+        f"f_blasius(Re_eff) = {f_blasius_eff:.6f}, error = {rel_error * 100:.1f}%"
+    )
 
     # For a Poiseuille-like flow at this Re_eff, the f is higher than Blasius
     # (Blasius is for turbulent flow). Just check f is positive and reasonable.
@@ -106,7 +110,11 @@ def test_mixing_length_produces_nonzero_mut():
     from diffcfd.solvers.turbulence import FrozenEddyViscosity
 
     fev = FrozenEddyViscosity.from_blasius(
-        Re=10000, ny=50, nx=20, ly=1.0, U_bulk=1.0,
+        Re=10000,
+        ny=50,
+        nx=20,
+        ly=1.0,
+        U_bulk=1.0,
     )
     mu_eff = fev.effective_viscosity(1e-4)
     assert fev.mu_t.max().item() > 0, "Eddy viscosity should be non-zero"
@@ -118,12 +126,16 @@ def test_effective_thermal_diffusivity():
     from diffcfd.solvers.turbulence import FrozenEddyViscosity
 
     fev = FrozenEddyViscosity.from_blasius(
-        Re=10000, ny=24, nx=48, ly=1.0, U_bulk=1.0,
+        Re=10000,
+        ny=24,
+        nx=48,
+        ly=1.0,
+        U_bulk=1.0,
     )
     alpha_mol = 1e-4 / 0.71
     alpha_eff = fev.effective_thermal_diffusivity(alpha_mol, Pr_t=0.9)
 
-    assert alpha_eff.min().item() >= alpha_mol, \
-        "Effective alpha should be >= molecular"
-    assert alpha_eff.max().item() > alpha_mol, \
+    assert alpha_eff.min().item() >= alpha_mol, "Effective alpha should be >= molecular"
+    assert alpha_eff.max().item() > alpha_mol, (
         "Turbulent contribution should increase effective alpha"
+    )

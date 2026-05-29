@@ -8,9 +8,8 @@ autograd graph.
 from __future__ import annotations
 
 import torch
-from torch import Tensor
 
-from diffcfd.geometry.airfoil import BSplineAirfoil, NACA4Digit, compute_forces
+from diffcfd.geometry.airfoil import BSplineAirfoil, compute_forces
 from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 

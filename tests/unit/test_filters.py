@@ -6,6 +6,7 @@ import pytest
 
 def test_helmholtz_filter_import():
     from diffcfd.geometry.filters import HelmholtzFilter
+
     assert HelmholtzFilter is not None
 
 

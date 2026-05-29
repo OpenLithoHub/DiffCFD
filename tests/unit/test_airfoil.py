@@ -1,11 +1,11 @@
 """Tests for airfoil geometry and aerodynamic optimization."""
 
-import pytest
 import torch
 
 
 def test_airfoil_import():
-    from diffcfd.geometry.airfoil import NACA4Digit, BSplineAirfoil, compute_forces
+    from diffcfd.geometry.airfoil import NACA4Digit
+
     assert NACA4Digit is not None
 
 
@@ -39,7 +39,9 @@ def test_bspline_airfoil():
     from diffcfd.geometry.airfoil import BSplineAirfoil
 
     mesh = CartesianMesh(nx=64, ny=64, lx=2.0, ly=2.0)
-    bspline = BSplineAirfoil(n_control_points=6, chord=0.8, leading_edge_x=0.5, center_y=1.0)
+    bspline = BSplineAirfoil(
+        n_control_points=6, chord=0.8, leading_edge_x=0.5, center_y=1.0
+    )
     cp = bspline.initial_control_points()
 
     assert cp.shape == (12, 2)

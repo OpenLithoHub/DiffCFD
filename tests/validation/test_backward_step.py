@@ -41,9 +41,7 @@ def test_backward_facing_step_re100():
         alpha_p=0.1,
     )
 
-    ux, uy, p = solver.solve_steady(
-        sdf=sdf_step, inlet_velocity=1.0, case="channel"
-    )
+    ux, uy, p = solver.solve_steady(sdf=sdf_step, inlet_velocity=1.0, case="channel")
 
     # Sanity checks
     assert not torch.any(torch.isnan(ux)), "NaN in ux"
@@ -54,5 +52,5 @@ def test_backward_facing_step_re100():
     # Verify recirculation: negative ux in the step wake region
     step_end_i = int(step_length / mesh.dx) + 2
     probe_j = int(step_h / mesh.dy) + 1
-    ux_wake = ux[probe_j, step_end_i:step_end_i + 10]
+    ux_wake = ux[probe_j, step_end_i : step_end_i + 10]
     assert ux_wake.min() < 0.5, "No recirculation detected behind step"

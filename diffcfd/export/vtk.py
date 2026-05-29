@@ -9,7 +9,6 @@ from torch import Tensor
 
 def _cell_center_velocity(ux: Tensor, uy: Tensor) -> tuple:
     """Interpolate staggered MAC velocities to cell centers."""
-    import numpy as np
     ux_np = ux.detach().cpu().numpy().astype("float64")
     uy_np = uy.detach().cpu().numpy().astype("float64")
     ux_cc = 0.5 * (ux_np[:, :-1] + ux_np[:, 1:])

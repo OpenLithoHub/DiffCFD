@@ -1,11 +1,11 @@
 """Edge case and integration tests for DiffCFD."""
 
-import pytest
 import torch
 import numpy as np
 
 
 # ── Geometry edge cases ──────────────────────────────────────────────
+
 
 def test_sdf_cylinder_at_boundary():
     """Cylinder SDF near domain boundary doesn't produce NaN."""
@@ -28,7 +28,7 @@ def test_sdf_naca0012_symmetric():
 
     ny = 64
     # Upper half vs lower half should be symmetric
-    diff = (sdf[:ny // 2, :] - sdf[ny // 2:, :].flip(0)).abs()
+    diff = (sdf[: ny // 2, :] - sdf[ny // 2 :, :].flip(0)).abs()
     assert diff.max().item() < 0.05, f"SDF asymmetry: {diff.max().item():.4f}"
 
 
@@ -61,13 +61,16 @@ def test_mesh_sdf_mask_sharp_interface():
 
 # ── Solver edge cases ────────────────────────────────────────────────
 
+
 def test_channel_very_low_re():
     """Channel flow at very low Re (Re=1) converges without NaN."""
     from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 
     solver = NavierStokes2D(
-        reynolds_number=1.0, grid=(16, 8),
-        max_iter=500, tol=1e-4,
+        reynolds_number=1.0,
+        grid=(16, 8),
+        max_iter=500,
+        tol=1e-4,
     )
     ux, uy, p = solver.solve_steady(inlet_velocity=1.0, case="channel")
     assert not torch.any(torch.isnan(ux))
@@ -83,22 +86,33 @@ def test_channel_sdf_obstruction():
     from diffcfd.geometry.shapes import cylinder_sdf
 
     solver_clean = NavierStokes2D(
-        reynolds_number=50, grid=(32, 16), lx=2.0, ly=1.0,
-        max_iter=500, tol=1e-4,
+        reynolds_number=50,
+        grid=(32, 16),
+        lx=2.0,
+        ly=1.0,
+        max_iter=500,
+        tol=1e-4,
     )
     ux_c, uy_c, p_c = solver_clean.solve_steady(inlet_velocity=1.0, case="channel")
     dp_clean = solver_clean.pressure_drop(ux_c, uy_c, p_c).item()
 
     solver_obs = NavierStokes2D(
-        reynolds_number=50, grid=(32, 16), lx=2.0, ly=1.0,
-        max_iter=500, tol=1e-4,
+        reynolds_number=50,
+        grid=(32, 16),
+        lx=2.0,
+        ly=1.0,
+        max_iter=500,
+        tol=1e-4,
     )
     sdf = cylinder_sdf(solver_obs.mesh, 1.0, 0.5, 0.15)
-    ux_o, uy_o, p_o = solver_obs.solve_steady(sdf=sdf, inlet_velocity=1.0, case="channel")
+    ux_o, uy_o, p_o = solver_obs.solve_steady(
+        sdf=sdf, inlet_velocity=1.0, case="channel"
+    )
     dp_obstructed = solver_obs.pressure_drop(ux_o, uy_o, p_o).item()
 
-    assert dp_obstructed > dp_clean, \
+    assert dp_obstructed > dp_clean, (
         f"Obstructed dp ({dp_obstructed:.4f}) should exceed clean ({dp_clean:.4f})"
+    )
 
 
 def test_implicit_diff_gradient_finite():
@@ -106,8 +120,13 @@ def test_implicit_diff_gradient_finite():
     from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 
     solver = NavierStokes2D(
-        reynolds_number=50, grid=(16, 8), lx=2.0, ly=1.0,
-        backward="implicit_diff", max_iter=500, tol=1e-4,
+        reynolds_number=50,
+        grid=(16, 8),
+        lx=2.0,
+        ly=1.0,
+        backward="implicit_diff",
+        max_iter=500,
+        tol=1e-4,
     )
     inlet = torch.tensor(1.0, requires_grad=True)
     ux, uy, p = solver.solve_steady(inlet_velocity=inlet, case="channel")
@@ -120,6 +139,7 @@ def test_implicit_diff_gradient_finite():
 
 
 # ── Heat transfer edge cases ─────────────────────────────────────────
+
 
 def test_pure_conduction_nusselt():
     """Pure conduction (zero velocity) gives Nu=1.0 for parallel plates."""
@@ -171,6 +191,7 @@ def test_heat_transfer_differentiable_gradient():
 
 # ── Turbulence edge cases ────────────────────────────────────────────
 
+
 def test_blasius_from_re_range():
     """Blasius model works across a range of Re values."""
     from diffcfd.solvers.turbulence import FrozenEddyViscosity
@@ -187,11 +208,13 @@ def test_blasius_from_re_range():
     nu_high = 1.0 / 50000
     ratio_low = (fev_low.mu_t.max() / nu_low).item()
     ratio_high = (fev_high.mu_t.max() / nu_high).item()
-    assert ratio_high > ratio_low, \
+    assert ratio_high > ratio_low, (
         f"μ_t/nu ratio should increase with Re: {ratio_high:.1f} vs {ratio_low:.1f}"
+    )
 
 
 # ── Environment edge cases ───────────────────────────────────────────
+
 
 def test_env_reset_idempotent():
     """Resetting environment twice gives same initial observation."""
@@ -209,8 +232,13 @@ def test_cylinder_env_zero_action():
     from diffcfd.envs.cylinder_wake import CylinderWakeEnv
 
     env = CylinderWakeEnv(
-        re=100.0, grid=(32, 16), max_steps=2,
-        lx=2.5, ly=1.0, cylinder_radius=0.05, cylinder_center=(0.5, 0.5),
+        re=100.0,
+        grid=(32, 16),
+        max_steps=2,
+        lx=2.5,
+        ly=1.0,
+        cylinder_radius=0.05,
+        cylinder_center=(0.5, 0.5),
     )
     obs, _ = env.reset()
     obs2, reward, done, truncated, info = env.step([0.0])
@@ -220,6 +248,7 @@ def test_cylinder_env_zero_action():
 
 
 # ── VTK export edge cases ────────────────────────────────────────────
+
 
 def test_vtk_export_basic(tmp_path):
     """VTK export produces a non-empty file."""
@@ -254,8 +283,17 @@ def test_vtk_export_extra_scalars(tmp_path):
     p = torch.zeros(4, 4)
 
     path = tmp_path / "extra.vtk"
-    save_vtk(ux, uy, p, mesh, path,
-             extra_scalars={"density": torch.ones(4, 4), "viscosity": torch.ones(4, 4) * 0.5})
+    save_vtk(
+        ux,
+        uy,
+        p,
+        mesh,
+        path,
+        extra_scalars={
+            "density": torch.ones(4, 4),
+            "viscosity": torch.ones(4, 4) * 0.5,
+        },
+    )
 
     content = path.read_text()
     assert "density" in content

@@ -10,7 +10,6 @@ gradient for Mode A geometry optimization through the gymnasium interface.
 
 from __future__ import annotations
 
-from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -18,7 +17,6 @@ import torch
 from torch import Tensor
 
 from diffcfd.envs.base import DiffCFDEnv
-from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.geometry.shapes import rectangle_sdf
 from diffcfd.solvers.heat_transfer import HeatTransfer2D
 from diffcfd.solvers.navier_stokes_2d import NavierStokes2D

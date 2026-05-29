@@ -34,9 +34,7 @@ def test_poiseuille_gradcheck():
     )
 
     def fn(u_in):
-        ux, uy, p = solver.solve_steady(
-            sdf=None, inlet_velocity=u_in, case="channel"
-        )
+        ux, uy, p = solver.solve_steady(sdf=None, inlet_velocity=u_in, case="channel")
         return solver.pressure_drop(ux, uy, p).unsqueeze(0)
 
     # gradcheck uses finite differences with eps=1e-6 by default
@@ -60,9 +58,7 @@ def test_lid_driven_cavity_gradcheck():
     )
 
     def fn(u_l):
-        ux, uy, p = solver.solve_steady(
-            sdf=None, lid_velocity=u_l, case="cavity"
-        )
+        ux, uy, p = solver.solve_steady(sdf=None, lid_velocity=u_l, case="cavity")
         return p.mean().unsqueeze(0)
 
     torch.autograd.gradcheck(fn, (u_lid,), eps=1e-4, atol=1e-3, rtol=1e-3)

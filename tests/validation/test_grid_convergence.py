@@ -19,10 +19,12 @@ GHIA_DIR = pathlib.Path(__file__).parent / "ghia1982"
 
 def _load_ghia(filename):
     data = np.loadtxt(GHIA_DIR / filename, delimiter=",", skiprows=1)
-    return data[:, 0], data[:, 1]   # y, u
+    return data[:, 0], data[:, 1]  # y, u
 
 
-def _run_cavity(nx: int, ny: int, re: float = 100.0, alpha_u: float = 0.7, alpha_p: float = 0.3) -> tuple:
+def _run_cavity(
+    nx: int, ny: int, re: float = 100.0, alpha_u: float = 0.7, alpha_p: float = 0.3
+) -> tuple:
     """Run lid-driven cavity and return centerline velocity profile."""
     from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 
@@ -70,9 +72,7 @@ def test_grid_convergence_re100():
     )
 
     # Fine grid should be within 5% of Ghia
-    assert l2_errors[-1] < 0.05, (
-        f"Fine grid L2 error {l2_errors[-1]:.4f} > 5%"
-    )
+    assert l2_errors[-1] < 0.05, f"Fine grid L2 error {l2_errors[-1]:.4f} > 5%"
 
 
 @pytest.mark.slow
