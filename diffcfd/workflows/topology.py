@@ -24,6 +24,19 @@ from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 
 
+def total_variation(x: Tensor) -> Tensor:
+    """Isotropic total variation for anti-checkerboard regularisation.
+
+    Borrowed from OpenLithoHub's Level-Set ILT (``_total_variation``).
+    Penalises per-pixel differences along both axes, suppressing
+    checkerboard artefacts that Helmholtz filtering alone may not
+    eliminate in topology optimisation.
+    """
+    diff_h = (x[1:, :] - x[:-1, :]).pow(2)
+    diff_w = (x[:, 1:] - x[:, :-1]).pow(2)
+    return diff_h.sum() + diff_w.sum()
+
+
 def smooth_heaviside(phi: Tensor, beta: float = 32.0) -> Tensor:
     """Smooth Heaviside projection: maps filtered density to [0, 1].
 
@@ -51,6 +64,7 @@ def optimize_topology(
     filter_radius: float = 0.08,
     beta: float = 16.0,
     beta_continuation: bool = True,
+    tv_weight: float = 0.0,
     inlet_velocity: float = 1.0,
     volume_fraction: float = 0.5,
     volume_penalty: float = 100.0,
@@ -127,6 +141,9 @@ def optimize_topology(
         vol_error = chi.mean() - volume_fraction
         vol_penalty = volume_penalty * vol_error ** 2
 
+        # Total variation regularisation (borrowed from OpenLithoHub ILT)
+        tv_loss = total_variation(chi) * tv_weight if tv_weight > 0 else 0.0
+
         # Convert to SDF-like field for Brinkman: positive in fluid, negative in solid
         sdf_approx = 2.0 * chi - 1.0
 
@@ -138,7 +155,7 @@ def optimize_topology(
 
         # Objective: minimize pressure drop
         dp = solver.pressure_drop(ux, uy, p)
-        loss = dp.abs() + vol_penalty
+        loss = dp.abs() + vol_penalty + tv_loss
 
         loss.backward()
         optimizer.step()

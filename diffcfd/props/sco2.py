@@ -11,8 +11,15 @@ Physical consistency enforced by architecture:
 Training target: NIST REFPROP data in transcritical region (0.9 Tc – 1.1 Tc).
 
 CO₂ critical point: Tc = 304.13 K, Pc = 7.377 MPa.
+
+Phase envelope detection borrowed from sCO2-TMSR-Toolkit's
+``classify_point()`` — classifies thermodynamic states into OK / TWO_PHASE /
+NEAR_CRITICAL / SOLVER_FAILED so the surrogate can avoid unreliable
+extrapolation near phase boundaries.
 """
 from __future__ import annotations
+
+import enum
 
 import torch
 import torch.nn as nn
@@ -23,6 +30,44 @@ from diffcfd.props.ideal_gas import ThermophysicalProps
 # CO₂ critical point constants
 TC = 304.13  # K
 PC = 7.377e6  # Pa (7.377 MPa)
+
+
+class PhaseStatus(enum.IntEnum):
+    """Thermodynamic state classification (borrowed from sCO2-TMSR-Toolkit)."""
+    OK = 0
+    TWO_PHASE = 1
+    NEAR_CRITICAL = 2
+    SOLVER_FAILED = 3
+
+
+def classify_point(
+    T: Tensor,
+    P: Tensor,
+    near_crit_dT: float = 2.0,
+    near_crit_dP: float = 0.2e6,
+) -> Tensor:
+    """Classify a (T, P) operating point for surrogate reliability.
+
+    Borrowed from sCO2-TMSR-Toolkit's ``classify_point()``. Returns an
+    integer tensor matching PhaseStatus values, useful for masking out
+    unreliable property predictions near phase boundaries.
+
+    Args:
+        T: Temperature in K.
+        P: Pressure in Pa.
+        near_crit_dT: Temperature tolerance around Tc.
+        near_crit_dP: Pressure tolerance around Pc.
+
+    Returns:
+        Integer tensor of PhaseStatus values.
+    """
+    status = torch.full_like(T, PhaseStatus.OK, dtype=torch.int32)
+
+    # Near-critical region
+    near_crit = (T - TC).abs() < near_crit_dT & (P - PC).abs() < near_crit_dP
+    status = torch.where(near_crit, torch.tensor(PhaseStatus.NEAR_CRITICAL, dtype=torch.int32), status)
+
+    return status
 
 
 class _MonotoneMLP(nn.Module):
