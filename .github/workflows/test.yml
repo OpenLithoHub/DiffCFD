@@ -17,14 +17,20 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Install Python dependencies
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install numpy scipy matplotlib pyamg "gymnasium>=0.26" meshio pyevtk pytest
 
-      - name: Install package
-        run: pip install -e .
+      - name: Build and install package
+        run: maturin build --release --interpreter python3 && pip install --force-reinstall --no-deps target/wheels/*.whl
 
       - name: Run unit tests
-        run: python -m pytest tests/unit/ -v --tb=short
-        timeout-minutes: 10
+        run: cd /tmp && python -m pytest $GITHUB_WORKSPACE/tests/unit/ -v --tb=short
+        timeout-minutes: 15

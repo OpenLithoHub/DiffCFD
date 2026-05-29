@@ -6,13 +6,11 @@ shape optimization within the DiffCFD SIMPLE framework.
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 from torch import Tensor
 
 from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.geometry.shapes import naca0012_sdf
-from diffcfd._diffcfd_rust import bspline_sdf as _rust_bspline_sdf
 
 
 class NACA4Digit:
@@ -177,7 +175,7 @@ class BSplineAirfoil:
         return cp
 
     def sdf(self, mesh: CartesianMesh, control_points: Tensor) -> Tensor:
-        """Compute SDF from B-spline control points (Rust-accelerated).
+        """Compute SDF from B-spline control points (differentiable).
 
         Args:
             mesh: CartesianMesh instance.
@@ -188,15 +186,41 @@ class BSplineAirfoil:
         """
         x, y = mesh.cell_centers()
         nx, ny = mesh.nx, mesh.ny
+        n_pts = control_points.shape[0]
 
-        cp_np = control_points.detach().cpu().numpy()
-        sdf_flat = _rust_bspline_sdf(
-            x.flatten().numpy().astype(np.float64),
-            y.flatten().numpy().astype(np.float64),
-            cp_np[:, 0].astype(np.float64),
-            cp_np[:, 1].astype(np.float64),
-        )
-        return torch.tensor(sdf_flat.reshape(ny, nx), dtype=torch.float32, device=mesh.device)
+        pts = torch.stack([x.flatten(), y.flatten()], dim=1)
+
+        min_dist_sq = torch.full((pts.shape[0],), float("inf"), device=mesh.device)
+        for i in range(n_pts):
+            j = (i + 1) % n_pts
+            a = control_points[i]
+            b = control_points[j]
+            ab = b - a
+            ap = pts - a
+            t = torch.clamp(
+                torch.sum(ap * ab, dim=1) / (torch.sum(ab * ab) + 1e-10),
+                0.0, 1.0,
+            )
+            closest = a + t.unsqueeze(1) * ab
+            dist_sq = torch.sum((pts - closest) ** 2, dim=1)
+            min_dist_sq = torch.minimum(min_dist_sq, dist_sq)
+
+        dist = torch.sqrt(min_dist_sq)
+
+        inside = torch.zeros(pts.shape[0], dtype=torch.bool, device=mesh.device)
+        for i in range(n_pts):
+            j = (i + 1) % n_pts
+            yi = control_points[i, 1]
+            yj = control_points[j, 1]
+            xi = control_points[i, 0]
+            xj = control_points[j, 0]
+            cond = (yi > pts[:, 1]) != (yj > pts[:, 1])
+            x_intersect = (pts[:, 1] - yi) / (yj - yi + 1e-10) * (xj - xi) + xi
+            cross = cond & (pts[:, 0] < x_intersect)
+            inside = inside ^ cross
+
+        sdf = torch.where(inside, -dist, dist)
+        return sdf.reshape(ny, nx)
 
 
 def compute_forces(
