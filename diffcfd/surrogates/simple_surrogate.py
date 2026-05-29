@@ -123,7 +123,6 @@ class SimpleSurrogate:
     ) -> None:
         self.base_solver = base_solver
         self._device = torch.device(device)
-        self.correction_interval = correction_interval
 
         self._correction_policy = CorrectionPolicy(
             correction_interval=correction_interval,
@@ -267,7 +266,7 @@ class SimpleSurrogate:
 
         for epoch in range(n_epochs):
             perm = torch.randperm(n_samples, device=self._device)
-            epoch_loss = 0.0
+            epoch_loss = torch.zeros((), device=self._device)
             n_batches = 0
 
             for start in range(0, n_samples, batch_size):
@@ -282,10 +281,10 @@ class SimpleSurrogate:
                 loss.backward()
                 self.optimizer.step()
 
-                epoch_loss += loss.item()
+                epoch_loss = epoch_loss + loss.detach()
                 n_batches += 1
 
-            avg_loss = epoch_loss / max(1, n_batches)
+            avg_loss = (epoch_loss / max(1, n_batches)).item()
             loss_history.append(avg_loss)
 
             if verbose and (epoch % 10 == 0 or epoch == n_epochs - 1):
