@@ -10,6 +10,8 @@
 
 PyTorch-native differentiable fluid dynamics — **matrix-free implicit differentiation** through SIMPLE-converged steady states with **O(N) memory**, plus gradient-attached `gymnasium.Env` for RL.
 
+> **Status:** Early-stage personal research project. Core solver and implicit differentiation verified against analytical solutions. No external users or third-party validation yet.
+
 </div>
 
 ---
@@ -144,7 +146,7 @@ diffcfd/
 | Milestone | Scope | Status |
 |:----------|:------|:-------|
 | v0.1 | 2D NS + matrix-free implicit diff + validation | Done |
-| v0.2 | Conjugate heat transfer + sCO₂ surrogate | Heat done, sCO₂ pending |
+| v0.2 | Conjugate heat transfer + sCO₂ surrogate | Heat done, sCO₂ pending (no timeline) |
 | v0.3 | Gymnasium environments (CylinderWake + HeatExchanger) | Done |
 | v0.35 | Frozen eddy viscosity for Re > 5000 | Done |
 | v0.4 | NACA + B-spline aerodynamic shape optimization | Done |
