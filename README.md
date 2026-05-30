@@ -13,6 +13,11 @@ PyTorch-native differentiable fluid dynamics — **matrix-free implicit differen
 
 > **Status:** Early-stage personal research project. Core solver and implicit differentiation verified against analytical solutions. No external users or third-party validation yet.
 
+**Honesty boundaries:**
+- CPU-only; no GPU benchmarks have been conducted.
+- No third-party experimental validation. All results are self-measured on a single workstation.
+- Spin-coating flagship benchmark (pre-K1 fix) produced NaN in 7/10 seeds; post-fix rerun is pending.
+
 </div>
 
 ---
@@ -24,6 +29,8 @@ Production CFD tools (OpenFOAM, ANSYS Fluent, SU2) are accurate but not differen
 | Framework | Gap |
 |:----------|:----|
 | PhiFlow / JAX-Fluids | Transient time-stepping only — no steady-state implicit diff |
+| JAX-Fluids 2.0 (CoPhC 309, 2025) | HPC differentiable CFD, 512xA100 — transient only, no steady-state, no RL |
+| Diff-FlowFSI (arXiv:2505.23940, 2025) | GPU-optimized differentiable FSI in JAX — transient only, no conjugate heat transfer |
 | HydroGym | Differentiable backend uses `gymnax` (not standard gymnasium) |
 | FluidGym | Gymnasium-compatible mode calls `.detach()` — gradients disabled |
 
@@ -187,6 +194,16 @@ python scripts/flagship_flow_litho.py
 
 This script runs both `optimize_joint_process` and `optimize_decoupled_process`, performs process window analysis around each optimum, prints a summary table, and writes `flagship_flow_litho_results.json`.
 
+**Flagship evidence status (post-K1 fix, commit 72914a1):**
+
+| Metric | Status |
+|:-------|:-------|
+| NaN seeds (spin-coating solver) | 0/10 (fixed) — previously 7/10 produced NaN |
+| Valid seeds (pre-K1 data on disk) | 3/10 — requires benchmark rerun |
+| Wilcoxon significance | Pending rerun |
+
+The K1 fix (semi-implicit integration + adaptive dt + finite guard) eliminated the NaN divergence in the spin-coating solver. The existing `flagship_flow_litho_results.json` was generated pre-fix and still contains NaN for seeds 43, 46–50. A full rerun with `python scripts/flagship_flow_litho.py --seed-sweep` is needed to produce clean 10/10 results.
+
 ---
 
 ## Validation (Verified)
@@ -208,17 +225,21 @@ All data below were measured on **AMD Ryzen 5 5600G (6 cores), 13 GB RAM, Ubuntu
 
 ### Table 1 — Comparison with Published Methods
 
-| Aspect | DiffCFD (this work) | PhiFlow [1] | JAX-Fluids [2] | SU2 adjoint [3] |
-|:-------|:--------------------|:-------------|:----------------|:-----------------|
-| Differentiation | Implicit (matrix-free GMRES) | Automatic (JAX tracing) | Automatic (JAX tracing) | Discrete adjoint |
-| Steady-state support | SIMPLE-converged steady states | Transient time-stepping only | Transient only | Steady (compressible) |
-| Memory (backward) | O(N·k), k = GMRES restart | O(N·T), T = time steps | O(N·T) | O(N) |
-| Backend | PyTorch | JAX | JAX | C++ / hand-derived |
-| RL integration | `gymnasium.Env` | `gymnax` (JAX-only) | None | None |
+| Aspect | DiffCFD (this work) | PhiFlow [1] | JAX-Fluids [2] | JAX-Fluids 2.0 [4] | Diff-FlowFSI [5] | SU2 adjoint [3] |
+|:-------|:--------------------|:-------------|:----------------|:---------------------|:------------------|:-----------------|
+| Differentiation | Implicit (matrix-free GMRES) | Automatic (JAX tracing) | Automatic (JAX tracing) | Automatic (JAX tracing) | Automatic (JAX tracing) | Discrete adjoint |
+| Steady-state support | SIMPLE-converged steady states | Transient time-stepping only | Transient only | Transient only | Transient only | Steady (compressible) |
+| Memory (backward) | O(N·k), k = GMRES restart | O(N·T), T = time steps | O(N·T) | O(N·T) | O(N·T) | O(N) |
+| Backend | PyTorch | JAX | JAX | JAX | JAX | C++ / hand-derived |
+| RL integration | `gymnasium.Env` | `gymnax` (JAX-only) | None | None | None | None |
+| Conjugate heat transfer | Yes | No | No | No | No | No |
+| sCO2 surrogate | Yes | No | No | No | No | No |
 
 > **Comparability note:** The memory scaling claim (O(N·k)) is a structural property of restarted GMRES, not a measured speedup over other tools. Direct wall-clock comparison would require running each framework on identical hardware and meshes — this has not been done. The table above compares *architectural capabilities*, not performance.
 >
-> [1] Holl, P., Kuckelberg, P., Thuerey, N. *PhiFlow — a differentiable PDE solving framework*. GitHub: tum-pbs/PhiFlow. [2] Bezgin, D. A., Buhendwa, A. B., Adams, N. A. "JAX-Fluids: A fully differentiable high-order computational fluid dynamics solver for compressible two-phase flows." *Computer Physics Communications*, 2023. [3] Economomon, T. D. et al. "The SU2 Project." *AIAA Journal*, 2016.
+> **DiffCFD's differentiation:** PyTorch-native (vs JAX in most others), steady-state implicit differentiation (vs transient-only in all JAX frameworks), `gymnasium.Env` RL integration, conjugate heat transfer, and sCO2 transcritical property surrogate — all on CPU without GPU requirement.
+>
+> [1] Holl, P., Kuckelberg, P., Thuerey, N. *PhiFlow — a differentiable PDE solving framework*. GitHub: tum-pbs/PhiFlow. [2] Bezgin, D. A., Buhendwa, A. B., Adams, N. A. "JAX-Fluids: A fully differentiable high-order computational fluid dynamics solver for compressible two-phase flows." *Computer Physics Communications*, 2023. [3] Economomon, T. D. et al. "The SU2 Project." *AIAA Journal*, 2016. [4] Bezgin, D. A. et al. "JAX-Fluids 2.0." *Computers & Physics Communications* 309, 2025. [5] Diff-FlowFSI: GPU-optimized differentiable fluid-structure interaction in JAX. arXiv:2505.23940, 2025.
 
 ### Table 2 — Solver Performance (Measured)
 
