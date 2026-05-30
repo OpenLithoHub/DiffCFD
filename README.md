@@ -483,7 +483,8 @@ diffcfd/
 │   ├── heat_transfer.py       # Conjugate heat transfer
 │   ├── turbulence.py          # Frozen eddy viscosity (Re > 5000)
 │   ├── implicit_diff.py       # Matrix-free GMRES backward (auto diagonal preconditioner)
-│   ├── boundary.py            # Boundary condition enforcement
+│   ├── fsi.py                 # FSI implicit differentiation (C7.2)
+│   ├── boundary.py            # Boundary condition enforcement + blowing/suction control (C7.3)
 │   ├── spin_coating.py        # Differentiable spin coating (Meyerhofer + radial PDE)
 │   └── litho.py               # Differentiable lithography solver (Dill exposure + Mack develop)
 ├── envs/
@@ -503,6 +504,7 @@ diffcfd/
 │   └── joint_litho_opt.py     # Joint spin-coating + lithography co-optimization
 ├── props/
 │   ├── ideal_gas.py           # Abstract ThermophysicalProps + ConstantProps
+│   ├── eos.py                 # Polynomial and cubic-spline equation of state (C7.1)
 │   └── sco2.py                # sCO2 transcritical property surrogate (C4)
 ├── surrogates/
 │   ├── fno.py                 # Fourier Neural Operator for flow prediction
@@ -537,6 +539,7 @@ src/ (Rust via PyO3/maturin, at repo root)
 | v0.6 | sCO₂ PCHE optimization + sCO2-TMSR-Toolkit integration | Done |
 | v0.7 | Rust-accelerated forward kernels (maturin/PyO3) | Done |
 | v0.75 | Differentiable spin coating + lithography solvers | Done |
+| v0.8 | Polynomial/Spline EOS (C7.1), FSI implicit differentiation (C7.2), blowing/suction boundary control (C7.3), containerized reproducibility (C7.4) | Done |
 | v1.0 | Full benchmark suite 11/11 pass + arXiv paper | Planned |
 
 ---
