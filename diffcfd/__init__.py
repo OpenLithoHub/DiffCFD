@@ -20,6 +20,8 @@ from diffcfd.workflows.topology import optimize_topology, smooth_heaviside
 from diffcfd.workflows.pche import optimize_pche
 from diffcfd.solvers.spin_coating import MeyerhoferSolver, RadialThinFilmSolver
 from diffcfd.workflows.spin_coat_opt import optimize_spin_profile
+from diffcfd.solvers.litho import LithoSolver
+from diffcfd.workflows.joint_litho_opt import optimize_joint_process
 from diffcfd.surrogates.fno import FNO2D, train_fno
 
 __all__ = [
@@ -48,6 +50,8 @@ __all__ = [
     "MeyerhoferSolver",
     "RadialThinFilmSolver",
     "optimize_spin_profile",
+    "LithoSolver",
+    "optimize_joint_process",
     "FNO2D",
     "train_fno",
 ]
