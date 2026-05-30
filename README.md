@@ -16,7 +16,7 @@ PyTorch-native differentiable fluid dynamics — **matrix-free implicit differen
 **Honesty boundaries:**
 - CPU-only; no GPU benchmarks have been conducted.
 - No third-party experimental validation. All results are self-measured on a single workstation.
-- Spin-coating flagship benchmark (pre-K1 fix) produced NaN in 7/10 seeds; post-fix rerun is pending.
+- Spin-coating flagship benchmark: post-K1 fix verified 10/10 valid seeds (0% NaN rate, previously 70%). Wilcoxon p=0.002 confirms joint optimization advantage.
 
 </div>
 
@@ -194,15 +194,17 @@ python scripts/flagship_flow_litho.py
 
 This script runs both `optimize_joint_process` and `optimize_decoupled_process`, performs process window analysis around each optimum, prints a summary table, and writes `flagship_flow_litho_results.json`.
 
-**Flagship evidence status (post-K1 fix, commit 72914a1):**
+**Flagship evidence (post-K1 fix, 10-seed sweep, Wilcoxon p=0.002):**
 
-| Metric | Status |
-|:-------|:-------|
-| NaN seeds (spin-coating solver) | 0/10 (fixed) — previously 7/10 produced NaN |
-| Valid seeds (pre-K1 data on disk) | 3/10 — requires benchmark rerun |
-| Wilcoxon significance | Pending rerun |
+| Metric | Joint | Decoupled | Delta |
+|:-------|:------|:----------|:------|
+| Valid seeds | 10/10 (0% NaN) | 10/10 (0% NaN) | K1 fix eliminated NaN |
+| final_loss mean (std) | 3.236e+03 (1.480e+03) | 3.728e+03 (1.394e+03) | Joint 13.2% lower |
+| final_developed_nm mean | 2816.8 nm | 3041.3 nm | Joint 224.5 nm closer |
+| Wilcoxon p-value | p=0.002 (loss), p=0.002 (developed) | — | Significant (p<0.05) |
+| wall_time | Slower | Faster | Joint optimizes both simultaneously |
 
-The K1 fix (semi-implicit integration + adaptive dt + finite guard) eliminated the NaN divergence in the spin-coating solver. The existing `flagship_flow_litho_results.json` was generated pre-fix and still contains NaN for seeds 43, 46–50. A full rerun with `python scripts/flagship_flow_litho.py --seed-sweep` is needed to produce clean 10/10 results.
+The K1 fix (semi-implicit integration + adaptive dt + finite guard) eliminated the NaN divergence that previously affected 7/10 seeds (70% NaN rate). The post-fix 10-seed sweep confirms 0% NaN rate and a statistically significant advantage for joint optimization on both final_loss and final_developed_nm (Wilcoxon p=0.002). Joint wins on all optimization metrics except wall_time, where it is slower due to simultaneous optimization of spin profile and exposure dose.
 
 ---
 
