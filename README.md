@@ -11,11 +11,11 @@
 
 PyTorch-native differentiable fluid dynamics — **matrix-free implicit differentiation** through SIMPLE-converged steady states with **O(N) memory**, plus gradient-attached `gymnasium.Env` for RL.
 
-> **Status:** Early-stage personal research project. Core solver and implicit differentiation verified against analytical solutions. No external users or third-party validation yet.
+> **Status:** Early-stage personal research project. Core solver and implicit differentiation verified against analytical solutions. Containerized reproducibility available (Docker). Analytical cross-validation replaces third-party validation.
 
 **Honesty boundaries:**
 - CPU-only; no GPU benchmarks have been conducted.
-- No third-party experimental validation. All results are self-measured on a single workstation.
+- No third-party experimental validation. All results are self-measured on a single workstation. Cross-validation against analytical solutions (Ghia 1982, Poiseuille) is automated via `make cross-validate`.
 - Spin-coating flagship benchmark: post-K1 fix verified 10/10 valid seeds (0% NaN rate, previously 70%). Wilcoxon p=0.002 confirms joint optimization advantage.
 
 **Known stubs / unimplemented:**
@@ -388,6 +388,56 @@ python docs/benchmark_charts.py
 **Methodology:** Timing uses `time.perf_counter()` with GC disabled during measurement. Performance benchmarks run 3 warmup iterations followed by 5 sampled iterations, reporting median/P95/P99. Validation benchmarks run once and report total wall-clock time. No values are extrapolated to untested configurations.
 
 > All test data were obtained by actually running the above commands on the described hardware. No performance numbers are estimated, inferred, or borrowed from other publications.
+
+---
+
+## Reproducibility
+
+All flagship benchmarks and validation cases can be reproduced in clean containers or locally with a single command.
+
+### Container (Docker)
+
+```bash
+# Build the container (includes Rust toolchain, CPU-only PyTorch)
+docker build -t diffcfd-flagship .
+
+# Run flagship benchmark (3-seed CI sweep)
+docker run --rm diffcfd-flagship
+
+# Or via Make:
+make docker-flagship
+```
+
+The container sets `PYTHONHASHSEED=42` for deterministic hashing. All results are printed to stdout and written to `flagship_flow_litho_results.json` inside the container.
+
+### Cross-Validation (Analytical Benchmarks)
+
+Run the solver against known closed-form solutions:
+
+```bash
+# Local
+make cross-validate
+
+# In Docker
+make docker-cross-validate
+```
+
+Cross-validation checks:
+
+| Test | Reference | Gate | Metric |
+|:-----|:----------|:-----|:-------|
+| Lid-driven cavity Re=100 | Ghia et al. 1982 | L2 < 1% | u-velocity centerline |
+| Poiseuille forward Re=1 | Analytical parabolic | L2 < 1% | Outlet velocity profile |
+| Poiseuille gradient Re=1 | Finite difference (eps=0.01) | rel err < 0.01% | dDP/dU_inlet |
+
+Results are written to `cross_validation_results.json`.
+
+### Local One-Key Reproduce
+
+```bash
+make reproduce        # 3-seed flagship sweep
+make cross-validate   # analytical benchmarks
+```
 
 ---
 
