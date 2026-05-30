@@ -150,8 +150,19 @@ class _SteadyStateNS(torch.autograd.Function):
 
         from diffcfd.utils.linalg import gmres_matfree
 
+        # Only precondition when Brinkman penalization is active (has_sdf).
+        # The JVP-based diagonal preconditioner handles the 1/eps stiffness
+        # in solid cells but degrades the pressure equation conditioning
+        # when applied to non-Brinkman systems.
+        M_inv = None
+        if has_sdf:
+            from diffcfd.solvers.implicit_diff import _brinkman_diag_precond
+            res_fn = lambda z: combined_res(z, theta_d, sdf_for_grad, ubx_for_grad, uby_for_grad)
+            M_inv = _brinkman_diag_precond(res_fn, z_star.detach())
+
         lambda_sol, _ = gmres_matfree(
-            matvec_Jt, loss_z.detach(), tol=1e-5, max_iter=2000, restart=200
+            matvec_Jt, loss_z.detach(), tol=1e-5, max_iter=2000, restart=200,
+            precond=M_inv,
         )
 
         # Gradient w.r.t. theta

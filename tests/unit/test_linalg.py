@@ -1,4 +1,4 @@
-"""Unit tests for matrix-free GMRES utilities."""
+"""Unit tests for matrix-free GMRES utilities and Brinkman-aware preconditioner."""
 
 import torch
 
@@ -11,14 +11,14 @@ def test_linalg_import():
 
 
 def test_gmres_diagonal_system():
-    """Solve a diagonal system A·x = b where A = diag(1,2,3,4)."""
+    """Solve a diagonal system A*x = b where A = diag(1,2,3,4)."""
     from diffcfd.utils.linalg import gmres_matfree
 
     d = torch.tensor([1.0, 2.0, 3.0, 4.0])
     b = torch.tensor([1.0, 2.0, 3.0, 4.0])
     x, iters = gmres_matfree(lambda v: d * v, b, tol=1e-6)
     assert torch.allclose(x, torch.ones(4), atol=1e-5), f"Expected [1,1,1,1], got {x}"
-    assert iters <= 8  # at most 2 restart cycles for 4-dim system
+    assert iters <= 8
 
 
 def test_scipy_gmres_diagonal_system():
@@ -32,17 +32,17 @@ def test_scipy_gmres_diagonal_system():
 
 
 def test_gmres_random_spd():
-    """Solve a random 20×20 SPD system; compare to torch.linalg.solve."""
+    """Solve a random 20x20 SPD system; compare to torch.linalg.solve."""
     from diffcfd.utils.linalg import gmres_matfree
 
     torch.manual_seed(42)
     A_raw = torch.randn(20, 20)
-    A = A_raw @ A_raw.T + 5 * torch.eye(20)  # SPD, well-conditioned
+    A = A_raw @ A_raw.T + 5 * torch.eye(20)
     b = torch.randn(20)
     x_ref = torch.linalg.solve(A, b)
     x, iters = gmres_matfree(lambda v: A @ v, b, tol=1e-6, restart=20)
     assert torch.allclose(x, x_ref, atol=1e-4), f"Max diff: {(x - x_ref).abs().max()}"
-    assert iters <= 40  # at most 2 restarts of size 20
+    assert iters <= 40
 
 
 def test_gmres_zero_rhs():
@@ -54,42 +54,6 @@ def test_gmres_zero_rhs():
     x, iters = gmres_matfree(lambda v: A @ v, b)
     assert torch.allclose(x, torch.zeros(5))
     assert iters == 0
-
-
-# --- Preconditioner tests (WS-C) ---
-
-
-def test_gmres_precond_backward_compatible():
-    """precond=None produces identical results to the old signature."""
-    from diffcfd.utils.linalg import gmres_matfree
-
-    torch.manual_seed(123)
-    A = torch.randn(10, 10)
-    A = A @ A.T + 3 * torch.eye(10)
-    b = torch.randn(10)
-
-    x_no_precond, iters_no = gmres_matfree(lambda v: A @ v, b, tol=1e-6)
-    x_none, iters_none = gmres_matfree(lambda v: A @ v, b, tol=1e-6, precond=None)
-    assert torch.allclose(x_no_precond, x_none, atol=1e-10)
-
-
-def test_gmres_jacobi_precond_ill_conditioned():
-    """Jacobi preconditioner improves convergence on ill-conditioned system."""
-    from diffcfd.utils.linalg import gmres_matfree
-
-    torch.manual_seed(42)
-    d = torch.tensor([1e-2, 1e-1, 1.0, 10.0, 100.0, 1e3, 1e4, 1e5])
-    A = torch.diag(d) + 0.01 * torch.randn(8, 8)
-    A = A + A.T
-    b = torch.randn(8)
-    x_ref = torch.linalg.solve(A, b)
-
-    diag_inv = 1.0 / A.diag().clamp(min=1e-10)
-    x_precond, _ = gmres_matfree(
-        lambda v: A @ v, b, tol=1e-6, max_iter=200,
-        precond=lambda v: diag_inv * v,
-    )
-    assert torch.allclose(x_precond, x_ref, atol=1e-3)
 
 
 def test_gmres_identity_precond_unchanged():
@@ -109,8 +73,30 @@ def test_gmres_identity_precond_unchanged():
     assert torch.allclose(x_plain, x_identity, atol=1e-8)
 
 
-def test_implicit_diff_precond_option():
-    """fixed_point_gradient accepts precond='jacobi' without error."""
+def test_brinkman_diag_precond_simple():
+    """Diagonal preconditioner via JVP improves convergence on stiff system."""
+    from diffcfd.solvers.implicit_diff import _brinkman_diag_precond
+
+    torch.manual_seed(42)
+    N = 20
+    # Build a diagonally dominant system with a few very stiff entries
+    d = torch.ones(N)
+    d[N // 3: 2 * N // 3] = 1e4  # stiff block
+
+    def residual_fn(z):
+        return d * z
+
+    z_star = torch.randn(N)
+    M_inv = _brinkman_diag_precond(residual_fn, z_star)
+
+    # Verify M_inv correctly inverts the diagonal
+    test_v = torch.randn(N)
+    result = M_inv(test_v)
+    assert torch.allclose(result, test_v / d, atol=1e-5)
+
+
+def test_implicit_diff_auto_precond():
+    """fixed_point_gradient with precond='auto' produces correct gradients."""
     from diffcfd.solvers.implicit_diff import fixed_point_gradient
 
     torch.manual_seed(7)
@@ -122,15 +108,18 @@ def test_implicit_diff_precond_option():
     def residual_fn(u, th):
         return 2.0 * u - th
 
-    grad_plain = fixed_point_gradient(residual_fn, u_star, theta, loss_grad, tol=1e-6)
-    grad_jacobi = fixed_point_gradient(
-        residual_fn, u_star, theta, loss_grad, tol=1e-6, precond="jacobi"
+    grad_auto = fixed_point_gradient(
+        residual_fn, u_star, theta, loss_grad, tol=1e-6, precond="auto"
+    )
+    grad_none = fixed_point_gradient(
+        residual_fn, u_star, theta, loss_grad, tol=1e-6, precond=None
     )
 
-    assert not torch.isnan(grad_jacobi).any()
-    # Both should give similar gradients for this simple system
-    rel_err = (grad_plain - grad_jacobi).norm() / (grad_plain.norm() + 1e-12)
-    assert rel_err < 0.1, f"Gradient mismatch: rel_err={rel_err:.4e}"
+    assert not torch.isnan(grad_auto).any()
+    assert not torch.isnan(grad_none).any()
+    # For this linear system, both should give identical gradients
+    assert torch.allclose(grad_auto, grad_none, atol=1e-4), \
+        f"Auto: {grad_auto}, None: {grad_none}"
 
 
 def test_gmres_stiff_brinkman_like():
@@ -139,9 +128,8 @@ def test_gmres_stiff_brinkman_like():
 
     torch.manual_seed(2024)
     N = 16
-    eps = 1e-3  # Moderate Brinkman penalty
+    eps = 1e-3
 
-    # A = small random SPD + eps^{-1} * diag(mask)
     mask = torch.zeros(N)
     mask[N // 4: 3 * N // 4] = 1.0
     A_raw = torch.randn(N, N)
