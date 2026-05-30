@@ -38,3 +38,39 @@ jobs:
           . .venv/bin/activate
           python -m pytest tests/unit/ -v --tb=short
         timeout-minutes: 15
+
+  flagship-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Create virtualenv and install dependencies
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install maturin
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy scipy matplotlib pyamg "gymnasium>=0.26" meshio pyevtk pytest
+      - name: Build and install package
+        run: |
+          . .venv/bin/activate
+          maturin develop --release
+      - name: Run flagship CI smoke test
+        run: |
+          . .venv/bin/activate
+          make flagship-b-ci
+      - name: Validate output JSON
+        run: |
+          . .venv/bin/activate
+          python3 -c "
+          import json
+          p = 'flagship_flow_litho_results.json'
+          with open(p) as f:
+              data = json.load(f)
+          assert 'aggregated' in data, 'missing aggregated'
+          assert 'per_seed' in data, 'missing per_seed'
+          print('OK: flagship output JSON valid')
+          "
