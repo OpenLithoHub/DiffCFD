@@ -164,7 +164,7 @@ def fixed_point_gradient(
         tol: GMRES convergence tolerance.
         max_iter: Maximum GMRES iterations (acceptance gate: < 200 at Re=1000).
         precond: Preconditioner strategy.  Options:
-            - ``None`` (default): no preconditioning, backward compatible.
+            - ``None``: no preconditioning.
             - ``"jacobi"``: Jacobi (diagonal) preconditioner.
             - ``"block_diag"``: Block-diagonal preconditioner (block_size=4).
             - ``Callable``: Custom right preconditioner M⁻¹.

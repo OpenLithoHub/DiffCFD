@@ -9,6 +9,8 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from diff_surrogate.geometry import sdf_from_curve
+
 from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.geometry.shapes import naca0012_sdf
 
@@ -185,9 +187,8 @@ class BSplineAirfoil:
     def sdf(self, mesh: CartesianMesh, control_points: Tensor) -> Tensor:
         """Compute SDF from B-spline control points (differentiable).
 
-        Uses the shared ``diff_surrogate.geometry.sdf_from_curve`` operator
-        when available; falls back to the built-in segment-distance + ray-cast
-        implementation.
+        Uses ``diff_surrogate.geometry.sdf_from_curve`` with soft-min
+        aggregation and differentiable winding number.
 
         Args:
             mesh: CartesianMesh instance.
@@ -196,55 +197,8 @@ class BSplineAirfoil:
         Returns:
             SDF tensor (ny, nx).
         """
-        try:
-            from diff_surrogate.geometry import sdf_from_curve
-
-            x, y = mesh.cell_centers()
-            # sdf_from_curve expects control_points directly (not B-spline eval)
-            # For BSplineAirfoil, control_points define a polygon, so pass directly
-            return sdf_from_curve(x, y, control_points, softmin_temp=10.0, winding_sharpness=20.0)
-        except ImportError:
-            pass
-
-        # Fallback: segment-distance + ray-cast winding number
         x, y = mesh.cell_centers()
-        nx, ny = mesh.nx, mesh.ny
-        n_pts = control_points.shape[0]
-
-        pts = torch.stack([x.flatten(), y.flatten()], dim=1)
-
-        min_dist_sq = torch.full((pts.shape[0],), float("inf"), device=mesh.device)
-        for i in range(n_pts):
-            j = (i + 1) % n_pts
-            a = control_points[i]
-            b = control_points[j]
-            ab = b - a
-            ap = pts - a
-            t = torch.clamp(
-                torch.sum(ap * ab, dim=1) / (torch.sum(ab * ab) + 1e-10),
-                0.0,
-                1.0,
-            )
-            closest = a + t.unsqueeze(1) * ab
-            dist_sq = torch.sum((pts - closest) ** 2, dim=1)
-            min_dist_sq = torch.minimum(min_dist_sq, dist_sq)
-
-        dist = torch.sqrt(min_dist_sq)
-
-        inside = torch.zeros(pts.shape[0], dtype=torch.bool, device=mesh.device)
-        for i in range(n_pts):
-            j = (i + 1) % n_pts
-            yi = control_points[i, 1]
-            yj = control_points[j, 1]
-            xi = control_points[i, 0]
-            xj = control_points[j, 0]
-            cond = (yi > pts[:, 1]) != (yj > pts[:, 1])
-            x_intersect = (pts[:, 1] - yi) / (yj - yi + 1e-10) * (xj - xi) + xi
-            cross = cond & (pts[:, 0] < x_intersect)
-            inside = inside ^ cross
-
-        sdf = torch.where(inside, -dist, dist)
-        return sdf.reshape(ny, nx)
+        return sdf_from_curve(x, y, control_points, softmin_temp=10.0, winding_sharpness=20.0)
 
 
 def compute_forces(

@@ -27,6 +27,8 @@ from typing import Sequence
 import torch
 from torch import Tensor
 
+from diff_surrogate.convergence import ConvergenceAction
+
 from diffcfd.geometry.filters import HelmholtzFilter
 from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
@@ -131,13 +133,7 @@ def optimize_topology(
     # Pre-load convergence action enum if monitor is provided
     _ConvergenceAction = None
     if convergence_monitor is not None:
-        try:
-            from diff_surrogate.convergence import ConvergenceAction as _ConvergenceAction
-        except ImportError as e:
-            raise ImportError(
-                "convergence_monitor requires the 'diff-surrogate' package. "
-                "Install with: pip install diff-surrogate"
-            ) from e
+        _ConvergenceAction = ConvergenceAction
 
     history = {"objective": [], "fluid_fraction": [], "penalty": []}
 
@@ -373,13 +369,7 @@ def multi_corner_optimize(
 
     _ConvergenceAction = None
     if convergence_monitor is not None:
-        try:
-            from diff_surrogate.convergence import ConvergenceAction as _ConvergenceAction
-        except ImportError as e:
-            raise ImportError(
-                "convergence_monitor requires the 'diff-surrogate' package. "
-                "Install with: pip install diff-surrogate"
-            ) from e
+        _ConvergenceAction = ConvergenceAction
 
     history: dict = {
         "combined": [],

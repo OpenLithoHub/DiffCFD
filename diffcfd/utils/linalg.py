@@ -43,8 +43,7 @@ def gmres_matfree(
         precond: Optional right preconditioner M⁻¹ such that AM⁻¹ is better
             conditioned.  When provided, the Arnoldi process applies
             ``w = matvec(precond(v_j))`` and the solution is recovered as
-            ``x = M⁻¹ y``.  Defaults to ``None`` (no preconditioning),
-            preserving backward compatibility.
+            ``x = M⁻¹ y``.
 
     Returns:
         x: Solution tensor, shape (N,).
