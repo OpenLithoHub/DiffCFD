@@ -285,7 +285,14 @@ python tests/benchmarks/benchmark_suite.py
 # 3. Run performance benchmarks with percentile stats
 python tests/benchmarks/benchmark_performance.py --json results/perf_bench.json
 
-# 4. Regenerate charts
+# 4. Flagship flow-litho co-optimization (multi-seed with Wilcoxon tests)
+make flagship-b          # 10 seeds, full report
+make flagship-b-ci       # 3 seeds, CI smoke test
+# Or directly:
+python3 scripts/flagship_flow_litho.py                  # single seed
+python3 scripts/flagship_flow_litho.py --seed-sweep     # 10 seeds
+
+# 5. Regenerate charts
 python docs/benchmark_charts.py
 ```
 
@@ -327,6 +334,15 @@ Use DiffCFD for **optimization loops and ML training**. Use OpenFOAM for **final
 | 128² grid, 2D, CPU | 16+ GB RAM |
 | 256² grid, 2D | GPU recommended |
 | 3D | Out of scope for v0.x |
+
+---
+
+## Architecture Decision Records
+
+| ADR | Title | Decision |
+|:----|:------|:---------|
+| [ADR-001](plans/adr-001-framework-gate.md) | Framework decision -- stay on PyTorch unified graph | JAX interop only via dlpack (`diff_surrogate.interop`); no JAX rewrite |
+| [ADR-002](plans/adr-002-thread-affinity.md) | Thread affinity for Rust/PyTorch coordination | Not needed; PyTorch internal thread pool handles parallelism adequately (<5% contention) |
 
 ---
 
