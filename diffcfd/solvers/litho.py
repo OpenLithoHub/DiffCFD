@@ -6,6 +6,16 @@ the final developed photoresist profile, taking spin-coating outputs as inputs.
 Dill exposure: Beer-Lambert attenuation with PAC bleaching kinetics.
 Mack development: Dissolution rate R(z) depends on PAC concentration M(z)
 and residual solvent C (plasticizing effect).
+
+Deduplication note (WS-B)
+-------------------------
+This ``LithoSolver`` is the canonical Dill/Mack physics implementation.
+OpenLithoHub wraps it via ``DiffCFDLithoSimulator``
+(``openlithohub/plugins/diffcfd_process.py``) and should not reimplement
+the exposure/development physics.  The plugin adapter translates
+OpenLithoHub's ``SimulatorConfig`` into the parameter surface below and
+handles thickness/solvent tensor construction.  Any new Dill/Mack features
+should be added here in DiffCFD, then exposed through the plugin adapter.
 """
 
 from __future__ import annotations
