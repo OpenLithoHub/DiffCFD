@@ -26,12 +26,15 @@ than the simplified Peng-Robinson EOS used by ``SCO2Surrogate``.
 from __future__ import annotations
 
 import enum
+import logging
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
 from diffcfd.props.ideal_gas import ThermophysicalProps
+
+logger = logging.getLogger(__name__)
 
 # CO2 critical point constants
 TC = 304.13  # K
@@ -307,6 +310,318 @@ def train_sco2_surrogate(
             )
 
     model._trained = True
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Polynomial and Spline EOS models
+# ---------------------------------------------------------------------------
+
+
+def _check_range(T_n: Tensor, p_n: Tensor, warn_threshold: float = 1.5) -> None:
+    """Log warning if normalized inputs are outside the fitting range."""
+    out_T = T_n.abs() > warn_threshold
+    out_p = p_n.abs() > warn_threshold
+    if out_T.any() or out_p.any():
+        logger.warning(
+            "EOS query outside fitting range: "
+            "T_n in [%s, %s], p_n in [%s, %s] (threshold=%.1f)",
+            T_n.min().item(),
+            T_n.max().item(),
+            p_n.min().item(),
+            p_n.max().item(),
+            warn_threshold,
+        )
+
+
+def _poly2d(x: Tensor, y: Tensor, coeffs: Tensor) -> Tensor:
+    """Evaluate 2D polynomial up to degree 4.
+
+    coeffs layout (15 terms for degree 4):
+      c0 + c1*x + c2*y + c3*x^2 + c4*xy + c5*y^2
+      + c6*x^3 + c7*x^2*y + c8*x*y^2 + c9*y^3
+      + c10*x^4 + c11*x^3*y + c12*x^2*y^2 + c13*x*y^3 + c14*y^4
+
+    Args:
+        x: Normalized temperature (any shape).
+        y: Normalized pressure (same shape as x).
+        coeffs: Tensor of 15 coefficients.
+
+    Returns:
+        Polynomial evaluation, same shape as x.
+    """
+    terms = [
+        torch.ones_like(x),  # 1
+        x,  # x
+        y,  # y
+        x**2,  # x^2
+        x * y,  # xy
+        y**2,  # y^2
+        x**3,  # x^3
+        x**2 * y,  # x^2 y
+        x * y**2,  # x y^2
+        y**3,  # y^3
+        x**4,  # x^4
+        x**3 * y,  # x^3 y
+        x**2 * y**2,  # x^2 y^2
+        x * y**3,  # x y^3
+        y**4,  # y^4
+    ]
+    stacked = torch.stack(terms, dim=-1)  # (..., 15)
+    return (stacked * coeffs).sum(dim=-1)
+
+
+def _num_poly_coeffs(degree: int) -> int:
+    """Number of coefficients for a 2D polynomial of given degree."""
+    return (degree + 1) * (degree + 2) // 2
+
+
+class PolynomialSCO2(nn.Module, ThermophysicalProps):
+    """Polynomial-based EOS for sCO2 transcritical properties.
+
+    Fits density, viscosity, conductivity, and specific heat as degree-4
+    2D polynomials in normalized (T, p) space. Coefficients are nn.Parameter
+    so they can be trained via gradient descent.
+
+    All outputs are positive (softplus on polynomial raw output + baseline).
+    """
+
+    def __init__(self, degree: int = 4) -> None:
+        nn.Module.__init__(self)
+        self.degree = degree
+        n_coeffs = _num_poly_coeffs(degree)
+        self._rho_coeffs = nn.Parameter(torch.randn(n_coeffs) * 0.01)
+        self._mu_coeffs = nn.Parameter(torch.randn(n_coeffs) * 0.01)
+        self._k_coeffs = nn.Parameter(torch.randn(n_coeffs) * 0.01)
+        self._cp_coeffs = nn.Parameter(torch.randn(n_coeffs) * 0.01)
+
+    def _normalize(self, T: Tensor, p: Tensor) -> tuple[Tensor, Tensor]:
+        T_n = (T - TC) / (0.2 * TC)
+        p_n = (p - PC) / (0.5 * PC)
+        _check_range(T_n, p_n)
+        return T_n, p_n
+
+    def density(self, T: Tensor, p: Tensor) -> Tensor:
+        T_n, p_n = self._normalize(T, p)
+        raw = _poly2d(T_n, p_n, self._rho_coeffs)
+        return torch.nn.functional.softplus(raw + 6.0) * 10.0 + 50.0
+
+    def viscosity(self, T: Tensor, p: Tensor) -> Tensor:
+        T_n, p_n = self._normalize(T, p)
+        raw = _poly2d(T_n, p_n, self._mu_coeffs)
+        return torch.nn.functional.softplus(raw) * 1e-5 + 1e-5
+
+    def conductivity(self, T: Tensor, p: Tensor) -> Tensor:
+        T_n, p_n = self._normalize(T, p)
+        raw = _poly2d(T_n, p_n, self._k_coeffs)
+        return torch.nn.functional.softplus(raw) * 0.01 + 0.05
+
+    def specific_heat(self, T: Tensor, p: Tensor) -> Tensor:
+        T_n, p_n = self._normalize(T, p)
+        raw = _poly2d(T_n, p_n, self._cp_coeffs)
+        return torch.nn.functional.softplus(raw) * 100.0 + 800.0
+
+
+class SplineSCO2(nn.Module, ThermophysicalProps):
+    """Spline-based EOS for sCO2 transcritical properties.
+
+    Stores a 2D grid of property values as nn.Parameter and uses
+    bilinear interpolation for queries within the grid. Extrapolation
+    uses nearest boundary values with a warning.
+    """
+
+    def __init__(self, grid_size: int = 20) -> None:
+        nn.Module.__init__(self)
+        self.grid_size = grid_size
+        self._rho_grid = nn.Parameter(torch.full((grid_size, grid_size), 400.0))
+        self._mu_grid = nn.Parameter(torch.full((grid_size, grid_size), 5e-5))
+        self._k_grid = nn.Parameter(torch.full((grid_size, grid_size), 0.06))
+        self._cp_grid = nn.Parameter(torch.full((grid_size, grid_size), 1200.0))
+
+    def _normalize(self, T: Tensor, p: Tensor) -> tuple[Tensor, Tensor]:
+        T_n = (T - TC) / (0.2 * TC)
+        p_n = (p - PC) / (0.5 * PC)
+        _check_range(T_n, p_n)
+        return T_n, p_n
+
+    def _interp(self, grid: Tensor, T_n: Tensor, p_n: Tensor) -> Tensor:
+        """Bilinear interpolation on the stored grid."""
+        gs = self.grid_size
+        # Map normalized coords to [0, gs-1] index space, clamped for extrapolation
+        ix = (T_n + 1.5) / 3.0 * (gs - 1)
+        iy = (p_n + 1.5) / 3.0 * (gs - 1)
+
+        # Clamp to grid bounds (nearest-boundary extrapolation)
+        ix_c = ix.clamp(0, gs - 1.001)
+        iy_c = iy.clamp(0, gs - 1.001)
+
+        ix0 = ix_c.floor().long()
+        iy0 = iy_c.floor().long()
+        ix1 = (ix0 + 1).clamp(max=gs - 1)
+        iy1 = (iy0 + 1).clamp(max=gs - 1)
+
+        fx = ix_c - ix0.float()
+        fy = iy_c - iy0.float()
+
+        v00 = grid[ix0, iy0]
+        v10 = grid[ix1, iy0]
+        v01 = grid[ix0, iy1]
+        v11 = grid[ix1, iy1]
+
+        return (v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy)
+                + v01 * (1 - fx) * fy + v11 * fx * fy)
+
+    def density(self, T: Tensor, p: Tensor) -> Tensor:
+        T_n, p_n = self._normalize(T, p)
+        return self._interp(self._rho_grid, T_n, p_n).clamp(min=1e-3)
+
+    def viscosity(self, T: Tensor, p: Tensor) -> Tensor:
+        T_n, p_n = self._normalize(T, p)
+        return self._interp(self._mu_grid, T_n, p_n).clamp(min=1e-8)
+
+    def conductivity(self, T: Tensor, p: Tensor) -> Tensor:
+        T_n, p_n = self._normalize(T, p)
+        return self._interp(self._k_grid, T_n, p_n).clamp(min=1e-4)
+
+    def specific_heat(self, T: Tensor, p: Tensor) -> Tensor:
+        T_n, p_n = self._normalize(T, p)
+        return self._interp(self._cp_grid, T_n, p_n).clamp(min=1.0)
+
+
+def fit_polynomial_eos(
+    reference_data: dict | None = None,
+    degree: int = 4,
+    epochs: int = 2000,
+    lr: float = 5e-3,
+) -> PolynomialSCO2:
+    """Fit polynomial coefficients to reference data."""
+    if reference_data is None:
+        reference_data = generate_training_data(n_samples=200)
+
+    T = reference_data["T"]
+    p = reference_data["p"]
+    rho_ref = reference_data["rho"]
+    mu_ref = reference_data["mu"]
+    k_ref = reference_data["k"]
+    cp_ref = reference_data["cp"]
+
+    model = PolynomialSCO2(degree=degree)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+
+    for epoch in range(epochs):
+        opt.zero_grad()
+        rho_pred = model.density(T, p)
+        mu_pred = model.viscosity(T, p)
+        k_pred = model.conductivity(T, p)
+        cp_pred = model.specific_heat(T, p)
+
+        def rel_mse(pred: Tensor, ref: Tensor) -> Tensor:
+            return ((pred - ref) / (ref.abs().mean() + 1e-8)).pow(2).mean()
+
+        loss = (
+            rel_mse(rho_pred, rho_ref)
+            + rel_mse(mu_pred, mu_ref)
+            + rel_mse(k_pred, k_ref)
+            + rel_mse(cp_pred, cp_ref)
+        )
+        loss.backward()
+        opt.step()
+
+    return model
+
+
+def _init_grid_from_data(
+    values: Tensor, T: Tensor, p: Tensor, grid_size: int
+) -> Tensor:
+    """Initialize a 2D grid by bin-averaging reference data.
+
+    Bins reference data into the grid and fills empty cells by nearest-neighbor
+    propagation. The resulting grid can be used to initialize a SplineSCO2.
+    """
+    T_n = (T - TC) / (0.2 * TC)
+    p_n = (p - PC) / (0.5 * PC)
+    gs = grid_size
+    grid = torch.full((gs, gs), float("nan"))
+    t_edges = torch.linspace(-1.5, 1.5, gs + 1)
+    p_edges = torch.linspace(-1.5, 1.5, gs + 1)
+    for i in range(gs):
+        for j in range(gs):
+            mask = (
+                (T_n >= t_edges[i])
+                & (T_n < t_edges[i + 1])
+                & (p_n >= p_edges[j])
+                & (p_n < p_edges[j + 1])
+            )
+            if mask.any():
+                grid[i, j] = values[mask].mean()
+    # Fill NaN cells by nearest non-NaN propagation
+    while torch.isnan(grid).any():
+        shifted = torch.full_like(grid, float("nan"))
+        for di in [-1, 0, 1]:
+            for dj in [-1, 0, 1]:
+                if di == 0 and dj == 0:
+                    continue
+                rolled = torch.roll(torch.roll(grid, -di, dims=0), -dj, dims=1)
+                valid = ~torch.isnan(rolled)
+                nan_here = torch.isnan(shifted)
+                shifted = torch.where(valid & nan_here, rolled, shifted)
+        grid = torch.where(torch.isnan(grid), shifted, grid)
+    return grid
+
+
+def fit_spline_eos(
+    reference_data: dict | None = None,
+    grid_size: int = 20,
+    epochs: int = 2000,
+    lr: float = 5e-3,
+) -> SplineSCO2:
+    """Fit spline grid to reference data."""
+    if reference_data is None:
+        reference_data = generate_training_data(n_samples=200)
+
+    T = reference_data["T"]
+    p = reference_data["p"]
+    rho_ref = reference_data["rho"]
+    mu_ref = reference_data["mu"]
+    k_ref = reference_data["k"]
+    cp_ref = reference_data["cp"]
+
+    model = SplineSCO2(grid_size=grid_size)
+    # Initialize grids from binned data for faster convergence
+    with torch.no_grad():
+        model._rho_grid.copy_(_init_grid_from_data(rho_ref, T, p, grid_size))
+        model._mu_grid.copy_(_init_grid_from_data(mu_ref, T, p, grid_size))
+        model._k_grid.copy_(_init_grid_from_data(k_ref, T, p, grid_size))
+        model._cp_grid.copy_(_init_grid_from_data(cp_ref, T, p, grid_size))
+
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+
+    for epoch in range(epochs):
+        opt.zero_grad()
+        rho_pred = model.density(T, p)
+        mu_pred = model.viscosity(T, p)
+        k_pred = model.conductivity(T, p)
+        cp_pred = model.specific_heat(T, p)
+
+        def rel_mse(pred: Tensor, ref: Tensor) -> Tensor:
+            return ((pred - ref) / (ref.abs().mean() + 1e-8)).pow(2).mean()
+
+        loss = (
+            rel_mse(rho_pred, rho_ref)
+            + rel_mse(mu_pred, mu_ref)
+            + rel_mse(k_pred, k_ref)
+            + rel_mse(cp_pred, cp_ref)
+        )
+        loss.backward()
+        opt.step()
+
+        # Project grid values to stay positive (ensures physical validity)
+        with torch.no_grad():
+            model._rho_grid.clamp_(min=1e-3)
+            model._mu_grid.clamp_(min=1e-8)
+            model._k_grid.clamp_(min=1e-4)
+            model._cp_grid.clamp_(min=1.0)
+
     return model
 
 
