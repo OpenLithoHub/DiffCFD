@@ -111,7 +111,7 @@ All data below were measured on **AMD Ryzen 5 5600G (6 cores), 13 GB RAM, Ubuntu
 
 > **Comparability note:** The memory scaling claim (O(N·k)) is a structural property of restarted GMRES, not a measured speedup over other tools. Direct wall-clock comparison would require running each framework on identical hardware and meshes — this has not been done. The table above compares *architectural capabilities*, not performance.
 >
-> [1] Holl, P., Kuckelberg, P., Thuerey, N. "PhiFlow." [需作者核实引用 — 是否有正式论文? GitHub: https://github.com/tum-pbs/PhiFlow] [2] Bezgin, D. A., Buhendwa, A. B., Adams, N. A. "JAX-Fluids: A fully differentiable high-order computational fluid dynamics solver for compressible two-phase flows." *Computer Physics Communications*, 2023. [3] Economomon, T. D. et al. "The SU2 Project." *AIAA Journal*, 2016.
+> [1] Holl, P., Kuckelberg, P., Thuerey, N. *PhiFlow — a differentiable PDE solving framework*. GitHub: tum-pbs/PhiFlow. [2] Bezgin, D. A., Buhendwa, A. B., Adams, N. A. "JAX-Fluids: A fully differentiable high-order computational fluid dynamics solver for compressible two-phase flows." *Computer Physics Communications*, 2023. [3] Economomon, T. D. et al. "The SU2 Project." *AIAA Journal*, 2016.
 
 ### Table 2 — Solver Performance (Measured)
 
@@ -121,11 +121,10 @@ Wall-clock time for steady-state SIMPLE convergence (`tol=1e-5`), single-threade
 |:-----|:-----|:---------|:---------|:-------|
 | Cavity Re=100 | 32² | 5.6 | 1.96% | < 2% |
 | Cavity Re=100 | 64² | 54.6 | 0.85% | < 1% |
-| Cavity Re=100 | 128² | 129.3 | [待填充: 128² L2 error] | < 0.5% |
-| Cavity Re=1000 | 128² | 1316.6 | [待填充] | < 2% |
-| Poiseuille Re=1 | 32×16 | [待填充] | 0.45% | < 1% |
-| Poiseuille Re=1 | 64×32 | [待填充] | 0.10% | < 0.5% |
-| Poiseuille Re=1 | 128×64 | [待填充] | 0.03% | < 0.1% |
+| Cavity Re=1000 | 128² | 1316.6 | — | < 2% |
+| Poiseuille Re=1 | 32×16 | — | 0.45% | < 1% |
+| Poiseuille Re=1 | 64×32 | — | 0.10% | < 0.5% |
+| Poiseuille Re=1 | 128×64 | — | 0.03% | < 0.1% |
 
 > **Note:** Cavity Re=100 at 128² takes ~2 min, Re=1000 at 128² takes ~22 min — higher Re requires more SIMPLE iterations and tighter under-relaxation. DiffCFD is tuned for optimization loops at 32²–64², not for production-scale simulations.
 
