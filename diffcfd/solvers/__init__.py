@@ -4,10 +4,13 @@ from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
 from diffcfd.solvers.heat_transfer import HeatTransfer2D
 from diffcfd.solvers.turbulence import FrozenEddyViscosity
 from diffcfd.solvers.implicit_diff import fixed_point_gradient
+from diffcfd.solvers.spin_coating import MeyerhoferSolver, RadialThinFilmSolver
 
 __all__ = [
     "NavierStokes2D",
     "HeatTransfer2D",
     "FrozenEddyViscosity",
     "fixed_point_gradient",
+    "MeyerhoferSolver",
+    "RadialThinFilmSolver",
 ]
