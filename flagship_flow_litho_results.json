@@ -67,35 +67,35 @@
       },
       "wall_time_s": {
         "values": [
-          2.8242594529874623,
-          2.214816745952703,
-          2.002034330042079,
-          1.9994474740233272,
-          2.0210128179751337,
-          2.0289063630625606,
-          2.0134379090741277,
-          2.0558028579689562,
-          2.0894194369902834,
-          2.003671245998703
+          6.767421899014153,
+          4.779798584990203,
+          3.9473007089691237,
+          3.647940014023334,
+          3.537152503966354,
+          3.571246605948545,
+          3.662936080014333,
+          3.6402185820043087,
+          3.5535499580437317,
+          3.546945916954428
         ],
-        "mean": 2.1252808634075335,
-        "std": 0.2541177205471235
+        "mean": 4.065451085392851,
+        "std": 1.0217785408035245
       },
       "process_window_width_mj": {
         "values": [
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
+          20.698997497558594,
+          7.710533142089844,
+          13.117546081542969,
+          2.222320556640625,
+          17.437896728515625,
+          2.2227935791015625,
+          15.278167724609375,
+          2.2214508056640625,
+          17.4375,
+          20.693130493164062
         ],
-        "mean": 0.0,
-        "std": 0.0
+        "mean": 11.904033660888672,
+        "std": 7.655787431533499
       }
     },
     "decoupled": {
@@ -149,35 +149,35 @@
       },
       "wall_time_s": {
         "values": [
-          1.3659571969183162,
-          1.391564070014283,
-          1.306541197001934,
-          1.304783731000498,
-          1.4494221589993685,
-          1.3381940589752048,
-          1.3255448860581964,
-          1.4586371089098975,
-          1.325825838954188,
-          1.3170750129502267
+          3.394370427937247,
+          2.9039218109101057,
+          2.286829341086559,
+          2.2822183800162748,
+          2.4069959790213034,
+          2.364224124001339,
+          2.282012904062867,
+          2.4245121700223535,
+          2.2837091230321676,
+          2.3369177990825847
         ],
-        "mean": 1.3583545259782113,
-        "std": 0.05706727643266215
+        "mean": 2.49657120591728,
+        "std": 0.36658839465174525
       },
       "process_window_width_mj": {
         "values": [
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
+          18.021530151367188,
+          11.39593505859375,
+          15.181060791015625,
+          3.8066253662109375,
+          18.022010803222656,
+          5.707054138183594,
+          16.12706756591797,
+          6.6568145751953125,
+          18.021995544433594,
+          18.969512939453125
         ],
-        "mean": 0.0,
-        "std": 0.0
+        "mean": 13.190960693359376,
+        "std": 5.830732959390529
       }
     }
   },
@@ -213,10 +213,9 @@
     {
       "test": "Wilcoxon signed-rank",
       "metric": "process_window_width_mj",
-      "statistic": 0.0,
-      "p_value": 1.0,
-      "significant_at_005": false,
-      "note": "All differences are zero"
+      "statistic": 12.0,
+      "p_value": 0.130859375,
+      "significant_at_005": false
     }
   ],
   "per_seed": [
@@ -231,19 +230,19 @@
         "final_developed_nm": 3571.062279661419,
         "opt_dose_mj": 108.94212341308594,
         "final_loss": 4959.15234375,
-        "wall_time_s": 2.8242594529874623,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 108.94212341308594,
-        "process_window_high_mj": 108.94212341308594
+        "wall_time_s": 6.767421899014153,
+        "process_window_width_mj": 20.698997497558594,
+        "process_window_low_mj": 99.13733673095703,
+        "process_window_high_mj": 119.83633422851562
       },
       "decoupled": {
         "final_developed_nm": 3722.1120692265686,
         "opt_dose_mj": 94.85015869140625,
         "final_loss": 5415.3818359375,
-        "wall_time_s": 1.3659571969183162,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 94.85015869140625,
-        "process_window_high_mj": 94.85015869140625
+        "wall_time_s": 3.394370427937247,
+        "process_window_width_mj": 18.021530151367188,
+        "process_window_low_mj": 86.31364440917969,
+        "process_window_high_mj": 104.33517456054688
       }
     },
     {
@@ -257,19 +256,19 @@
         "final_developed_nm": 2548.2368073426187,
         "opt_dose_mj": 110.15042114257812,
         "final_loss": 2496.47509765625,
-        "wall_time_s": 2.214816745952703,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 110.15042114257812,
-        "process_window_high_mj": 110.15042114257812
+        "wall_time_s": 4.779798584990203,
+        "process_window_width_mj": 7.710533142089844,
+        "process_window_low_mj": 105.74440002441406,
+        "process_window_high_mj": 113.4549331665039
       },
       "decoupled": {
         "final_developed_nm": 2749.0102638694225,
         "opt_dose_mj": 94.96614074707031,
         "final_loss": 2933.03515625,
-        "wall_time_s": 1.391564070014283,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 94.96614074707031,
-        "process_window_high_mj": 94.96614074707031
+        "wall_time_s": 2.9039218109101057,
+        "process_window_width_mj": 11.39593505859375,
+        "process_window_low_mj": 89.26817321777344,
+        "process_window_high_mj": 100.66410827636719
       }
     },
     {
@@ -283,19 +282,19 @@
         "final_developed_nm": 3021.0105705918977,
         "opt_dose_mj": 109.31285858154297,
         "final_loss": 3530.761962890625,
-        "wall_time_s": 2.002034330042079,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 109.31285858154297,
-        "process_window_high_mj": 109.31285858154297
+        "wall_time_s": 3.9473007089691237,
+        "process_window_width_mj": 13.117546081542969,
+        "process_window_low_mj": 102.75408935546875,
+        "process_window_high_mj": 115.87163543701172
       },
       "decoupled": {
         "final_developed_nm": 3181.5523016121006,
         "opt_dose_mj": 94.8815689086914,
         "final_loss": 3941.820556640625,
-        "wall_time_s": 1.306541197001934,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 94.8815689086914,
-        "process_window_high_mj": 94.8815689086914
+        "wall_time_s": 2.286829341086559,
+        "process_window_width_mj": 15.181060791015625,
+        "process_window_low_mj": 87.2910385131836,
+        "process_window_high_mj": 102.47209930419922
       }
     },
     {
@@ -309,19 +308,19 @@
         "final_developed_nm": 1676.5354757808382,
         "opt_dose_mj": 111.11617279052734,
         "final_loss": 1058.2469482421875,
-        "wall_time_s": 1.9994474740233272,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 111.11617279052734,
-        "process_window_high_mj": 111.11617279052734
+        "wall_time_s": 3.647940014023334,
+        "process_window_width_mj": 2.222320556640625,
+        "process_window_low_mj": 110.00501251220703,
+        "process_window_high_mj": 112.22733306884766
       },
       "decoupled": {
         "final_developed_nm": 2161.2513592117466,
         "opt_dose_mj": 95.16570281982422,
         "final_loss": 1819.2947998046875,
-        "wall_time_s": 1.304783731000498,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 95.16570281982422,
-        "process_window_high_mj": 95.16570281982422
+        "wall_time_s": 2.2822183800162748,
+        "process_window_width_mj": 3.8066253662109375,
+        "process_window_low_mj": 93.26239013671875,
+        "process_window_high_mj": 97.06901550292969
       }
     },
     {
@@ -335,19 +334,19 @@
         "final_developed_nm": 3214.8554964805953,
         "opt_dose_mj": 108.98681640625,
         "final_loss": 4006.5244140625,
-        "wall_time_s": 2.0210128179751337,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 108.98681640625,
-        "process_window_high_mj": 108.98681640625
+        "wall_time_s": 3.537152503966354,
+        "process_window_width_mj": 17.437896728515625,
+        "process_window_low_mj": 100.26786804199219,
+        "process_window_high_mj": 117.70576477050781
       },
       "decoupled": {
         "final_developed_nm": 3360.9865113248816,
         "opt_dose_mj": 94.85266876220703,
         "final_loss": 4403.9921875,
-        "wall_time_s": 1.4494221589993685,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 94.85266876220703,
-        "process_window_high_mj": 94.85266876220703
+        "wall_time_s": 2.4069959790213034,
+        "process_window_width_mj": 18.022010803222656,
+        "process_window_low_mj": 86.31592559814453,
+        "process_window_high_mj": 104.33793640136719
       }
     },
     {
@@ -361,19 +360,19 @@
         "final_developed_nm": 2008.7484244868392,
         "opt_dose_mj": 111.1399917602539,
         "final_loss": 1534.6783447265625,
-        "wall_time_s": 2.0289063630625606,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 111.1399917602539,
-        "process_window_high_mj": 111.1399917602539
+        "wall_time_s": 3.571246605948545,
+        "process_window_width_mj": 2.2227935791015625,
+        "process_window_low_mj": 110.02859497070312,
+        "process_window_high_mj": 112.25138854980469
       },
       "decoupled": {
         "final_developed_nm": 2339.1648937831633,
         "opt_dose_mj": 95.11760711669922,
         "final_loss": 2121.33251953125,
-        "wall_time_s": 1.3381940589752048,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 95.11760711669922,
-        "process_window_high_mj": 95.11760711669922
+        "wall_time_s": 2.364224124001339,
+        "process_window_width_mj": 5.707054138183594,
+        "process_window_low_mj": 92.26408386230469,
+        "process_window_high_mj": 97.97113800048828
       }
     },
     {
@@ -387,19 +386,19 @@
         "final_developed_nm": 3061.744791921228,
         "opt_dose_mj": 109.12969970703125,
         "final_loss": 3628.242919921875,
-        "wall_time_s": 2.0134379090741277,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 109.12969970703125,
-        "process_window_high_mj": 109.12969970703125
+        "wall_time_s": 3.662936080014333,
+        "process_window_width_mj": 15.278167724609375,
+        "process_window_low_mj": 101.49061584472656,
+        "process_window_high_mj": 116.76878356933594
       },
       "decoupled": {
         "final_developed_nm": 3214.6790545084514,
         "opt_dose_mj": 94.86509704589844,
         "final_loss": 4024.538818359375,
-        "wall_time_s": 1.3255448860581964,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 94.86509704589844,
-        "process_window_high_mj": 94.86509704589844
+        "wall_time_s": 2.282012904062867,
+        "process_window_width_mj": 16.12706756591797,
+        "process_window_low_mj": 87.27588653564453,
+        "process_window_high_mj": 103.4029541015625
       }
     },
     {
@@ -413,19 +412,19 @@
         "final_developed_nm": 2114.1470369911985,
         "opt_dose_mj": 111.07249450683594,
         "final_loss": 1704.2813720703125,
-        "wall_time_s": 2.0558028579689562,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 111.07249450683594,
-        "process_window_high_mj": 111.07249450683594
+        "wall_time_s": 3.6402185820043087,
+        "process_window_width_mj": 2.2214508056640625,
+        "process_window_low_mj": 109.9617691040039,
+        "process_window_high_mj": 112.18321990966797
       },
       "decoupled": {
         "final_developed_nm": 2435.1925276278052,
         "opt_dose_mj": 95.09736633300781,
         "final_loss": 2300.63818359375,
-        "wall_time_s": 1.4586371089098975,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 95.09736633300781,
-        "process_window_high_mj": 95.09736633300781
+        "wall_time_s": 2.4245121700223535,
+        "process_window_width_mj": 6.6568145751953125,
+        "process_window_low_mj": 91.29347229003906,
+        "process_window_high_mj": 97.95028686523438
       }
     },
     {
@@ -439,19 +438,19 @@
         "final_developed_nm": 3221.7014904745156,
         "opt_dose_mj": 108.98440551757812,
         "final_loss": 4023.87646484375,
-        "wall_time_s": 2.0894194369902834,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 108.98440551757812,
-        "process_window_high_mj": 108.98440551757812
+        "wall_time_s": 3.5535499580437317,
+        "process_window_width_mj": 17.4375,
+        "process_window_low_mj": 100.26565551757812,
+        "process_window_high_mj": 117.70315551757812
       },
       "decoupled": {
         "final_developed_nm": 3368.643092471757,
         "opt_dose_mj": 94.85261535644531,
         "final_loss": 4424.35791015625,
-        "wall_time_s": 1.325825838954188,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 94.85261535644531,
-        "process_window_high_mj": 94.85261535644531
+        "wall_time_s": 2.2837091230321676,
+        "process_window_width_mj": 18.021995544433594,
+        "process_window_low_mj": 86.31587982177734,
+        "process_window_high_mj": 104.33787536621094
       }
     },
     {
@@ -465,19 +464,19 @@
         "final_developed_nm": 3730.4389479686506,
         "opt_dose_mj": 108.91122436523438,
         "final_loss": 5418.2529296875,
-        "wall_time_s": 2.003671245998703,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 108.91122436523438,
-        "process_window_high_mj": 108.91122436523438
+        "wall_time_s": 3.546945916954428,
+        "process_window_width_mj": 20.693130493164062,
+        "process_window_low_mj": 99.10921478271484,
+        "process_window_high_mj": 119.8023452758789
       },
       "decoupled": {
         "final_developed_nm": 3880.240456055617,
         "opt_dose_mj": 94.8475341796875,
         "final_loss": 5890.81591796875,
-        "wall_time_s": 1.3170750129502267,
-        "process_window_width_mj": 0.0,
-        "process_window_low_mj": 94.8475341796875,
-        "process_window_high_mj": 94.8475341796875
+        "wall_time_s": 2.3369177990825847,
+        "process_window_width_mj": 18.969512939453125,
+        "process_window_low_mj": 85.36277770996094,
+        "process_window_high_mj": 104.33229064941406
       }
     }
   ]
