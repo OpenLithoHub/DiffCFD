@@ -267,13 +267,18 @@ def process_window_analysis(
     spin_dt: float,
     h0: float = 8e-6,
     c0: float = 0.85,
-    target_developed_nm: float = 50.0,
     n_sweep: int = 21,
     dose_range_frac: float = 0.10,
     dev_time: float = 30.0,
-    tolerance_nm: float = 10.0,
+    tolerance_frac: float = 0.02,
 ) -> dict:
-    """Sweep dose around the nominal value and evaluate developed thickness.  :stable:
+    """Sweep dose around nominal and evaluate process window.  :stable:
+
+    Target and tolerance are **self-derived** from the nominal-dose forward
+    pass rather than hardcoded.  The nominal developed thickness becomes the
+    target and tolerance is a relative fraction of that value.  This ensures
+    the process window metric is meaningful regardless of the absolute scale
+    of the lithography output.
 
     Args:
         omega_profile: Spin speed profile tensor (rad/s).
@@ -281,11 +286,11 @@ def process_window_analysis(
         spin_dt: Time step used for the spin solver.
         h0: Initial wet film thickness (m).
         c0: Initial solvent fraction.
-        target_developed_nm: Target developed thickness (nm).
         n_sweep: Number of dose sweep points.
         dose_range_frac: Fraction of nominal dose for the sweep range (±).
         dev_time: Development time (s).
-        tolerance_nm: Acceptable deviation from target (nm) for process window.
+        tolerance_frac: Relative tolerance as fraction of nominal developed
+            thickness (e.g. 0.02 = ±2%).
 
     Returns:
         Dictionary with sweep results and process window bounds.
@@ -305,6 +310,25 @@ def process_window_analysis(
         h_dry = h_hist[-1]
         c_dry = c_hist[-1]
 
+        h_nom = litho_solver(h_dry, c_dry, nominal_dose, dev_time=dev_time)
+        dev_nm_nominal = h_nom.item() * 1e9
+
+    if not math.isfinite(dev_nm_nominal):
+        return {
+            "nominal_dose_mj": dose_val,
+            "nominal_developed_nm": float("nan"),
+            "sweep_results": [],
+            "process_window_low_mj": dose_val,
+            "process_window_high_mj": dose_val,
+            "process_window_width_mj": 0.0,
+            "target_nm": float("nan"),
+            "tolerance_nm": float("nan"),
+            "tolerance_frac": tolerance_frac,
+        }
+
+    target_nm = dev_nm_nominal
+    tolerance_nm = abs(dev_nm_nominal) * tolerance_frac
+
     results: list[dict] = []
     acceptable_doses: list[float] = []
 
@@ -320,7 +344,7 @@ def process_window_analysis(
                 "acceptable": False,
             })
             continue
-        err_nm = abs(dev_nm - target_developed_nm)
+        err_nm = abs(dev_nm - target_nm)
         acceptable = err_nm <= tolerance_nm
         results.append({
             "dose_mj": d.item(),
@@ -337,12 +361,14 @@ def process_window_analysis(
 
     return {
         "nominal_dose_mj": dose_val,
+        "nominal_developed_nm": dev_nm_nominal,
         "sweep_results": results,
         "process_window_low_mj": window_low,
         "process_window_high_mj": window_high,
         "process_window_width_mj": window_width_mj,
-        "target_nm": target_developed_nm,
+        "target_nm": target_nm,
         "tolerance_nm": tolerance_nm,
+        "tolerance_frac": tolerance_frac,
     }
 
 

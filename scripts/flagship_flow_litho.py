@@ -162,10 +162,9 @@ def _process_window(
         omega_profile=omega,
         nominal_dose=dose,
         spin_dt=SPIN_DT,
-        target_developed_nm=TARGET_NM,
         n_sweep=21,
         dose_range_frac=0.10,
-        tolerance_nm=10.0,
+        tolerance_frac=0.02,
         h0=h0,
         c0=c0,
     )

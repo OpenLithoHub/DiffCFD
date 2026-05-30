@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 
+import pytest
 import torch
 
 from diffcfd.solvers.litho import LithoSolver
@@ -110,7 +111,7 @@ def test_joint_differs_from_decoupled():
 
 
 def test_process_window_analysis():
-    """Process window analysis returns valid sweep with sensible bounds."""
+    """Process window analysis returns valid sweep with self-consistent target."""
     omega = torch.full((N_STEPS,), 2500.0 * RPM_TO_RAD)
     dose = torch.tensor(80.0)
 
@@ -118,10 +119,9 @@ def test_process_window_analysis():
         omega_profile=omega,
         nominal_dose=dose,
         spin_dt=SPIN_DT,
-        target_developed_nm=TARGET_NM,
         n_sweep=11,
         dose_range_frac=0.10,
-        tolerance_nm=20.0,
+        tolerance_frac=0.02,
     )
 
     assert len(pw["sweep_results"]) == 11
@@ -129,7 +129,39 @@ def test_process_window_analysis():
         assert math.isfinite(entry["dose_mj"])
         assert math.isfinite(entry["developed_nm"])
         assert entry["developed_nm"] >= 0.0
-    assert pw["process_window_width_mj"] >= 0.0
+
+    assert math.isfinite(pw["nominal_developed_nm"])
+    assert pw["nominal_developed_nm"] > 0.0
+    assert pw["target_nm"] == pw["nominal_developed_nm"]
+    assert pw["tolerance_nm"] == pytest.approx(
+        pw["nominal_developed_nm"] * 0.02, rel=1e-6
+    )
+
+
+def test_process_window_nonzero_width():
+    """Process window must have non-zero width at nominal dose."""
+    omega = torch.full((N_STEPS,), 2500.0 * RPM_TO_RAD)
+    dose = torch.tensor(80.0)
+
+    pw = process_window_analysis(
+        omega_profile=omega,
+        nominal_dose=dose,
+        spin_dt=SPIN_DT,
+        n_sweep=21,
+        dose_range_frac=0.10,
+        tolerance_frac=0.02,
+    )
+
+    assert pw["process_window_width_mj"] > 0.0, (
+        f"Process window width is zero — target={pw['target_nm']:.1f} nm, "
+        f"tolerance={pw['tolerance_nm']:.1f} nm. "
+        "Self-derived target should produce a non-degenerate window."
+    )
+
+    assert any(s["acceptable"] for s in pw["sweep_results"]), (
+        "No dose in the sweep was acceptable — the nominal dose should always "
+        "be acceptable when target is self-derived from it."
+    )
 
 
 def test_joint_produces_different_omega_than_decoupled():
