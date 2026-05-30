@@ -1,8 +1,8 @@
 """Base gymnasium.Env for DiffCFD reinforcement learning environments (v0.3+).
 
-C2 patent claim: step_differentiable() preserves the autograd graph (no .detach()
+step_differentiable() preserves the autograd graph (no .detach()
 on outputs), enabling policy_gradient() to return exact analytical gradients via
-implicit diff (C1).
+implicit differentiation.
 
 Mode A: single-step contextual bandit (geometry/BC optimization).
 Mode B: sequential quasi-steady-state episode (flow control, SB3/PPO compatible).

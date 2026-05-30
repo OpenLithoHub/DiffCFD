@@ -1,8 +1,8 @@
 """Example: CylinderWakeEnv gymnasium environment.
 
-Demonstrates the C2 patent claim:
+Demonstrates:
     standard gymnasium.Env with gradient-attached step()
-    → policy_gradient() returns exact analytical gradients via implicit diff
+    -> policy_gradient() returns exact analytical gradients via implicit diff
 
 The environment supports two modes:
     Mode A: single-step contextual bandit (geometry optimization)

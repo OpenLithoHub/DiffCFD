@@ -1,11 +1,11 @@
 """Example: implicit differentiation through Poiseuille channel flow.
 
-Demonstrates the C1 patent claim:
-    solve SIMPLE to steady state → compute pressure drop →
-    backward via matrix-free GMRES on unrelaxed physics residual →
-    exact analytical gradient dΔP/dU_inlet
+Demonstrates:
+    solve SIMPLE to steady state -> compute pressure drop ->
+    backward via matrix-free GMRES on unrelaxed physics residual ->
+    exact analytical gradient dDP/dU_inlet
 
-Compares against the analytical solution: dΔP/dU = 12μL/h² for
+Compares against the analytical solution: dDP/dU = 12*mu*L/h^2 for
 fully-developed Poiseuille flow.
 """
 

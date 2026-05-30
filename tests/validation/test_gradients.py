@@ -1,6 +1,6 @@
 """Gradient verification tests for implicit differentiation.
 
-C1 patent claim: matrix-free GMRES implicit differentiation gives exact
+Verifies that matrix-free GMRES implicit differentiation gives exact
 gradients. Verified by:
 1. torch.autograd.gradcheck on implicit diff backward
 2. Cross-validation: implicit diff vs finite differences

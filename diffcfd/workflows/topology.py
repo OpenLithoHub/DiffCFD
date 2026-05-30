@@ -1,11 +1,11 @@
 """Topology optimization workflow using differentiable Helmholtz filter + Brinkman.
 
-C3 patent embodiment: coupled geometry and boundary condition optimization with
+Coupled geometry and boundary condition optimization with
 manufacturing constraints (minimum feature size).
 
 The optimization chain is:
-    design variables ρ → Helmholtz filter → smooth Heaviside projection →
-    Brinkman penalization mask → SIMPLE solve → objective → implicit diff backward
+    design variables rho -> Helmholtz filter -> smooth Heaviside projection ->
+    Brinkman penalization mask -> SIMPLE solve -> objective -> implicit diff backward
 
 All within a single PyTorch autograd computational graph.
 

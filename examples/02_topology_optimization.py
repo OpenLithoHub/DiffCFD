@@ -1,8 +1,8 @@
 """Example: topology optimization for minimum pressure drop.
 
-Demonstrates the C3 patent embodiment:
-    design variables → Helmholtz filter → smooth Heaviside →
-    Brinkman penalization → SIMPLE solve → pressure drop → implicit diff
+Demonstrates:
+    design variables -> Helmholtz filter -> smooth Heaviside ->
+    Brinkman penalization -> SIMPLE solve -> pressure drop -> implicit diff
 
 All within a single PyTorch autograd computational graph.
 """

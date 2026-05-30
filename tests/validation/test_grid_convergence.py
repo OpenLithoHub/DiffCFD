@@ -1,8 +1,7 @@
 """Grid convergence study: Richardson extrapolation on lid-driven cavity.
 
-Runs the lid-driven cavity at Re=100 on 16², 32², 64² grids and verifies
-that the solution converges monotonically. This prevents the "numbers were
-tuned" critique during patent examination.
+Runs the lid-driven cavity at Re=100 on 16-squared, 32-squared, 64-squared grids and verifies
+that the solution converges monotonically.
 
 Uses Ghia et al. 1982 reference data for the centerline u-velocity profile.
 """

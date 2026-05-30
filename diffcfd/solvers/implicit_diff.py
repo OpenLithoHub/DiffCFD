@@ -1,6 +1,6 @@
 """Fixed-point implicit differentiation through SIMPLE-converged steady state.
 
-C1 patent claim core: the dual-function architecture.
+Dual-function architecture:
 - Forward: under-relaxed SIMPLE (stable convergence, not used in backward).
 - Backward: matrix-free GMRES on unrelaxed physics residual R(u*, theta) = 0.
 

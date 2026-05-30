@@ -1,11 +1,11 @@
 """Validation: Poiseuille flow analytical gradient verification.
 
-Acceptance gate (v0.1 before CN filing):
+Acceptance gate (v0.1):
 - forward: ux outlet profile matches parabolic to L2 < 1%
-- gradient: implicit-diff ∂ΔP/∂U_inlet must match FD reference to < 0.01%
+- gradient: implicit-diff dDP/dU_inlet must match FD reference to < 0.01%
 
-The C1 patent claim: matrix-free GMRES implicit differentiation through SIMPLE
-gives EXACT gradients. Verified against FD with eps=0.01 (in the linear regime
+Verifies that matrix-free GMRES implicit differentiation through SIMPLE
+gives exact gradients. Verified against FD with eps=0.01 (in the linear regime
 for Stokes flow at Re=1, larger eps avoids floating-point noise).
 """
 

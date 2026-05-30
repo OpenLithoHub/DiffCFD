@@ -1,4 +1,4 @@
-"""Cylinder wake environment (Mode B) — C2 patent embodiment.
+"""Cylinder wake environment (Mode B).
 
 Quasi-steady-state flow control around a circular cylinder at Re=100.
 Action: cylinder rotation rate (dimensionless, α = ω·D/(2·U∞)).

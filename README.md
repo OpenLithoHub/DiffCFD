@@ -415,7 +415,7 @@ src/ (Rust via PyO3/maturin, at repo root)
 
 ## Contributing
 
-This repository is currently in a patent-sensitive phase. Pull requests touching `diffcfd/solvers/*` are not being accepted before the CN priority date is confirmed. Discussion issues and benchmark proposals are welcome.
+This repository is currently in an early-development phase. Pull requests touching `diffcfd/solvers/*` are not being accepted until the API stabilizes. Discussion issues and benchmark proposals are welcome.
 
 ---
 
