@@ -204,6 +204,8 @@ This script runs both `optimize_joint_process` and `optimize_decoupled_process`,
 | Wilcoxon p-value | p=0.002 (loss), p=0.002 (developed) | — | Significant (p<0.05) |
 | wall_time | Slower | Faster | Joint optimizes both simultaneously |
 
+> **Process window note (N1 fix):** The process window metric now uses a **self-derived target** from the nominal-dose forward pass (tolerance ±2%) instead of the previous hardcoded 50±10 nm which was invalid at the µm-scale output range. A 10-seed re-sweep is required to populate updated process window widths.
+
 The K1 fix (semi-implicit integration + adaptive dt + finite guard) eliminated the NaN divergence that previously affected 7/10 seeds (70% NaN rate). The post-fix 10-seed sweep confirms 0% NaN rate and a statistically significant advantage for joint optimization on both final_loss and final_developed_nm (Wilcoxon p=0.002). Joint wins on all optimization metrics except wall_time, where it is slower due to simultaneous optimization of spin profile and exposure dose.
 
 ---
