@@ -231,7 +231,9 @@ diffcfd/
 │   ├── navier_stokes_2d.py    # 2D incompressible NS + SIMPLE (Rust-accelerated forward)
 │   ├── heat_transfer.py       # Conjugate heat transfer
 │   ├── turbulence.py          # Frozen eddy viscosity (Re > 5000)
-│   └── implicit_diff.py       # Matrix-free GMRES backward
+│   ├── implicit_diff.py       # Matrix-free GMRES backward
+│   ├── spin_coating.py        # Differentiable spin coating (Meyerhofer + radial PDE)
+│   └── litho.py               # Differentiable lithography solver (Dill exposure + Mack develop)
 ├── envs/
 │   ├── cylinder_wake.py       # Cylinder wake RL (Mode B)
 │   ├── heat_exchanger.py      # Heat exchanger fin (Mode A)
@@ -244,7 +246,9 @@ diffcfd/
 ├── workflows/
 │   ├── aero.py                # Aerodynamic shape optimization
 │   ├── topology.py            # Topology optimization + Helmholtz filter
-│   └── pche.py                # PCHE channel optimization
+│   ├── pche.py                # PCHE channel optimization
+│   ├── spin_coat_opt.py       # Spin coating profile optimization
+│   └── joint_litho_opt.py     # Joint spin-coating + lithography co-optimization
 ├── props/
 │   ├── ideal_gas.py           # Abstract ThermophysicalProps + ConstantProps
 │   └── sco2.py                # sCO2 transcritical property surrogate (C4)
@@ -259,7 +263,8 @@ diffcfd/
     ├── momentum.rs             # Sparse momentum system assembly
     ├── pressure.rs             # Pressure correction system assembly
     ├── sdf.rs                  # B-spline SDF (rayon parallel)
-    └── simple.rs               # Full SIMPLE forward loop
+    ├── simple.rs               # Full SIMPLE forward loop
+    └── utils.rs                # Shared helpers (hybrid scheme, COO→CSR)
 ```
 
 ---
@@ -277,6 +282,7 @@ diffcfd/
 | v0.5 | FNO surrogate-in-the-loop | Done |
 | v0.6 | sCO₂ PCHE optimization + sCO2-TMSR-Toolkit integration | Done |
 | v0.7 | Rust-accelerated forward kernels (maturin/PyO3) | Done |
+| v0.75 | Differentiable spin coating + lithography solvers | Done |
 | v1.0 | Full benchmark suite 11/11 pass + arXiv paper | Planned |
 
 ---

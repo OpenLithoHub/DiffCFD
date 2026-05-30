@@ -95,7 +95,7 @@ class HeatExchangerEnv(DiffCFDEnv):
         sdf1 = rectangle_sdf(self._mesh, x1, 0.0, x1 + fin_width, h1)
         sdf2 = rectangle_sdf(self._mesh, x2, 0.0, x2 + fin_width, h2)
 
-        return torch.maximum(sdf1, sdf2)
+        return torch.minimum(sdf1, sdf2)
 
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
@@ -141,7 +141,7 @@ class HeatExchangerEnv(DiffCFDEnv):
         dp = self._solver.pressure_drop(ux, uy, p)
         reward = Nu / (1.0 + dp.abs())
 
-        obs = torch.tensor([reward.item()], device=self.device)
+        obs = torch.stack([reward])
         done = True  # Mode A: single step
         info = {"Nu": Nu.item(), "dp": dp.item(), "reward": reward.item()}
 

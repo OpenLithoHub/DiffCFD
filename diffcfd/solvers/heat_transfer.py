@@ -434,8 +434,13 @@ def coupled_steady_solve(
     inlet_velocity: float = 1.0,
     lid_velocity: float = 0.0,
     case: str = "channel",
+    n_buoyancy_iters: int = 10,
+    buoyancy_tol: float = 1e-4,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """Solve coupled NS + energy to steady state.
+    """Solve coupled NS + energy to steady state (differentiable).
+
+    Uses solve_differentiable() for the energy equation so gradients flow
+    through the temperature field to the Nusselt number objective.
 
     For non-buoyancy cases: sequential (NS first, then energy).
     For buoyancy: iterate between NS (with Boussinesq term) and energy.
@@ -450,6 +455,8 @@ def coupled_steady_solve(
         inlet_velocity: Inlet velocity (channel flow).
         lid_velocity: Lid velocity (cavity flow).
         case: Flow case ('channel' or 'cavity').
+        n_buoyancy_iters: Max iterations for buoyancy coupling.
+        buoyancy_tol: Convergence tolerance on max|ΔT|.
 
     Returns:
         (ux, uy, p, T) velocity, pressure, temperature fields.
@@ -461,12 +468,12 @@ def coupled_steady_solve(
         case=case,
     )
 
-    T = heat_solver.solve(ux, uy, T_bc=T_bc)
+    T = heat_solver.solve_differentiable(ux, uy, T_bc=T_bc)
 
     if buoyancy and Ra > 0:
-        # Boussinesq approximation: F_b = Ra * alpha * (T - T_ref) in y-direction
         T_ref = 0.5
-        for _ in range(3):
+        for _ in range(n_buoyancy_iters):
+            T_old = T
             buoyancy_src = Ra * heat_solver.alpha * (T - T_ref)
             ux, uy, p = ns_solver.solve_steady(
                 sdf=sdf,
@@ -475,6 +482,10 @@ def coupled_steady_solve(
                 case=case,
                 buoyancy_src=buoyancy_src,
             )
-            T = heat_solver.solve(ux, uy, T_bc=T_bc)
+            T = heat_solver.solve_differentiable(ux, uy, T_bc=T_bc)
+            with torch.no_grad():
+                res = (T - T_old).abs().max().item()
+                if res < buoyancy_tol:
+                    break
 
     return ux, uy, p, T

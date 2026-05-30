@@ -51,7 +51,7 @@ class MeyerhoferSolver(nn.Module):
     @staticmethod
     def _viscosity(mu_solvent: float | Tensor, alpha: float, beta: float, c_val: Tensor) -> Tensor:
         visc_arg = alpha * torch.pow((1.0 - c_val) / c_val, beta)
-        visc_arg = torch.clamp(visc_arg, max=20.0)
+        visc_arg = torch.nn.functional.softplus(20.0 - visc_arg) + visc_arg - 20.0
         return mu_solvent * torch.exp(visc_arg)
 
     def forward(

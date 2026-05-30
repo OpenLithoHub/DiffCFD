@@ -75,7 +75,8 @@ class DiffCFDEnv(gym.Env):
         Returns:
             Gradient tensor, same shape as action.
         """
-        action = action.detach().requires_grad_(True)
+        if not action.requires_grad:
+            action = action.detach().requires_grad_(True)
         _, reward, _, _ = self.step_differentiable(action)
         reward.backward()
         return action.grad

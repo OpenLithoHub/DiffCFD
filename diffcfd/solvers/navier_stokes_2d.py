@@ -53,13 +53,15 @@ class _SteadyStateNS(torch.autograd.Function):
 
     Forward pass: run SIMPLE (non-differentiable, under-relaxed).
     Backward pass: solve adjoint via matrix-free GMRES on unrelaxed residual.
-    Gradients computed w.r.t. both theta (scalar BC parameter) and sdf (geometry).
+    Gradients computed w.r.t. theta (scalar BC), sdf (geometry), and u_body (body velocity).
     """
 
     @staticmethod
-    def forward(ctx, theta, solver, case, sdf):
+    def forward(ctx, theta, solver, case, sdf, u_body_x, u_body_y):
         theta_val = theta.detach()
         sdf_val = sdf.detach() if sdf is not None else None
+        ubx_val = u_body_x.detach() if u_body_x is not None else None
+        uby_val = u_body_y.detach() if u_body_y is not None else None
         if case == "channel":
             ux, uy, p, a_ux, a_uy = solver._run_simple(
                 sdf_val,
@@ -67,6 +69,8 @@ class _SteadyStateNS(torch.autograd.Function):
                 lid_velocity=0.0,
                 case=case,
                 return_aP=True,
+                u_body_x=ubx_val,
+                u_body_y=uby_val,
             )
         else:
             ux, uy, p, a_ux, a_uy = solver._run_simple(
@@ -75,30 +79,35 @@ class _SteadyStateNS(torch.autograd.Function):
                 lid_velocity=theta_val,
                 case=case,
                 return_aP=True,
+                u_body_x=ubx_val,
+                u_body_y=uby_val,
             )
         u_star = solver._pack_interior(ux, uy).detach()
-        # Save both theta and sdf for backward (both need requires_grad tracking)
-        ctx.save_for_backward(
-            u_star, theta, sdf_val if sdf_val is not None else torch.tensor([])
-        )
+        saved_sdf = sdf_val if sdf_val is not None else torch.tensor([])
+        saved_ubx = ubx_val if ubx_val is not None else torch.tensor([])
+        saved_uby = uby_val if uby_val is not None else torch.tensor([])
+        ctx.save_for_backward(u_star, theta, saved_sdf, saved_ubx, saved_uby)
         ctx.solver = solver
         ctx.case = case
         ctx.p = p.detach()
         ctx.has_sdf = sdf is not None
+        ctx.has_ubx = u_body_x is not None
+        ctx.has_uby = u_body_y is not None
         ctx.a_ux = a_ux.detach()
         ctx.a_uy = a_uy.detach()
         return ux.detach(), uy.detach(), p.detach()
 
     @staticmethod
     def backward(ctx, dL_dux, dL_duy, dL_dp):
-        u_star, theta, sdf_saved = ctx.saved_tensors
+        u_star, theta, sdf_saved, ubx_saved, uby_saved = ctx.saved_tensors
         solver = ctx.solver
         p = ctx.p
         case = ctx.case
         _nx, _ny = solver.nx, solver.ny
         has_sdf = ctx.has_sdf
+        has_ubx = ctx.has_ubx
+        has_uby = ctx.has_uby
 
-        # Build Brinkman field differentiably (for backward)
         bk_eps = 1e-3
         if has_sdf:
             sdf_for_grad = sdf_saved.detach().requires_grad_(True)
@@ -107,6 +116,9 @@ class _SteadyStateNS(torch.autograd.Function):
         else:
             _brinkman = None
             sdf_for_grad = None
+
+        ubx_for_grad = ubx_saved.detach().requires_grad_(True) if has_ubx else None
+        uby_for_grad = uby_saved.detach().requires_grad_(True) if has_uby else None
 
         p_star = p.flatten()
         z_star = torch.cat([u_star, p_star])
@@ -122,16 +134,17 @@ class _SteadyStateNS(torch.autograd.Function):
 
         theta_d = theta.detach().requires_grad_(True)
 
-        def combined_res(z, th, sd):
+        def combined_res(z, th, sd, ubx, uby):
             bk = None
             if sd is not None:
                 ch = solver.mesh.sdf_to_mask(sd, epsilon=bk_eps)
                 bk = (1.0 - ch) / bk_eps
-            return solver._combined_residual(z, th, n_u, case, bk)
+            return solver._combined_residual(z, th, n_u, case, bk, ubx, uby)
 
         def matvec_Jt(v):
             _, vjp_fn = torch.func.vjp(
-                lambda z: combined_res(z, theta_d, sdf_for_grad), z_star.detach()
+                lambda z: combined_res(z, theta_d, sdf_for_grad, ubx_for_grad, uby_for_grad),
+                z_star.detach(),
             )
             return vjp_fn(v)[0]
 
@@ -143,7 +156,8 @@ class _SteadyStateNS(torch.autograd.Function):
 
         # Gradient w.r.t. theta
         _, vjp_th = torch.func.vjp(
-            lambda th: combined_res(z_star.detach(), th, sdf_for_grad), theta_d
+            lambda th: combined_res(z_star.detach(), th, sdf_for_grad, ubx_for_grad, uby_for_grad),
+            theta_d,
         )
         dL_dtheta = -vjp_th(lambda_sol.detach())[0]
 
@@ -151,11 +165,30 @@ class _SteadyStateNS(torch.autograd.Function):
         dL_dsdf = None
         if has_sdf:
             _, vjp_sdf = torch.func.vjp(
-                lambda sd: combined_res(z_star.detach(), theta_d, sd), sdf_for_grad
+                lambda sd: combined_res(z_star.detach(), theta_d, sd, ubx_for_grad, uby_for_grad),
+                sdf_for_grad,
             )
             dL_dsdf = -vjp_sdf(lambda_sol.detach())[0]
 
-        return dL_dtheta, None, None, dL_dsdf
+        # Gradient w.r.t. u_body_x
+        dL_dubx = None
+        if has_ubx:
+            _, vjp_ubx = torch.func.vjp(
+                lambda ubx: combined_res(z_star.detach(), theta_d, sdf_for_grad, ubx, uby_for_grad),
+                ubx_for_grad,
+            )
+            dL_dubx = -vjp_ubx(lambda_sol.detach())[0]
+
+        # Gradient w.r.t. u_body_y
+        dL_duby = None
+        if has_uby:
+            _, vjp_uby = torch.func.vjp(
+                lambda uby: combined_res(z_star.detach(), theta_d, sdf_for_grad, ubx_for_grad, uby),
+                uby_for_grad,
+            )
+            dL_duby = -vjp_uby(lambda_sol.detach())[0]
+
+        return dL_dtheta, None, None, dL_dsdf, dL_dubx, dL_duby
 
 
 class NavierStokes2D:
@@ -250,7 +283,7 @@ class NavierStokes2D:
                         float(lid_velocity), dtype=torch.float32, device=self.device
                     )
                 )
-            return _SteadyStateNS.apply(theta, self, case, sdf)
+            return _SteadyStateNS.apply(theta, self, case, sdf, u_body_x, u_body_y)
         else:
             return self._run_simple(
                 sdf,
@@ -448,6 +481,8 @@ class NavierStokes2D:
         p: Tensor,
         case: Literal["channel", "cavity"],
         brinkman: Tensor | None = None,
+        u_body_x: Tensor | None = None,
+        u_body_y: Tensor | None = None,
     ) -> Tensor:
         """Pure-PyTorch unrelaxed NS momentum residual at state u_flat.
 
@@ -459,6 +494,8 @@ class NavierStokes2D:
             p: Converged pressure field (ny, nx), treated as constant.
             case: "channel" or "cavity".
             brinkman: Optional Brinkman penalization (ny, nx); zeros if None.
+            u_body_x: Optional body x-velocity (ny, nx) for rotating immersed bodies.
+            u_body_y: Optional body y-velocity (ny, nx) for rotating immersed bodies.
 
         Returns:
             Residual vector, same shape as u_flat.
@@ -611,6 +648,11 @@ class NavierStokes2D:
         dp_dx = (p[1:-1, 1:] - p[1:-1, :-1]) / dx  # (ny-2, nx-1): p[j,ii+1]-p[j,ii]
 
         R_ux = a_P0_u * u_c - nb_e - nb_w - nb_n - nb_s - (-dp_dx * dy)
+
+        # Body velocity source: Brinkman term (u - u_body)/eps contributes bk * u_body to residual
+        if u_body_x is not None:
+            ubx_face = 0.5 * (u_body_x[1:-1, :-1] + u_body_x[1:-1, 1:])
+            R_ux = R_ux - bk_face * ubx_face
         # Subtract BC source contributions (already removed from matrix side)
         # For north BC row: a_n_bc * u_north_wall was added to RHS in solve; in residual it's on LHS side
         R_ux[-1:, :] -= a_n_bc * u_north_wall
@@ -709,6 +751,11 @@ class NavierStokes2D:
 
         R_uy = a_P0_v * v_c - nb_vn - nb_vs - nb_ve - nb_vw - (-dp_dy * dx)
 
+        # Body velocity source for v-momentum
+        if u_body_y is not None:
+            uby_face = 0.5 * (u_body_y[:-1, :] + u_body_y[1:, :])
+            R_uy = R_uy - bk_v * uby_face
+
         # Subtract BC source terms for v-momentum:
         # North boundary (jj=ny-2, j=ny-1): wall uy=0 → a_vn * 0 = 0 (no effect, but include for generality)
         # South boundary (jj=0, j=1): wall uy=0 → a_vs * 0 = 0
@@ -728,6 +775,8 @@ class NavierStokes2D:
         n_u: int,
         case: Literal["channel", "cavity"],
         brinkman: "Tensor | None" = None,
+        u_body_x: "Tensor | None" = None,
+        u_body_y: "Tensor | None" = None,
     ) -> "Tensor":
         """Combined (u, p) residual for implicit differentiation.
 
@@ -747,7 +796,7 @@ class NavierStokes2D:
         p_flat = z[n_u:]
         p_2d = p_flat.reshape(ny, nx)
 
-        R_u = self._residual_flat(u_flat, theta, p_2d, case, brinkman)
+        R_u = self._residual_flat(u_flat, theta, p_2d, case, brinkman, u_body_x, u_body_y)
 
         # Reconstruct full ux/uy to compute divergence
         ux_int, uy_int = self._unpack_interior(u_flat)
@@ -791,6 +840,8 @@ class NavierStokes2D:
             uy_c[:, 0] = 0.0
             uy_c[:, -1] = 0.0
             uy = uy_c
+        else:
+            raise ValueError(f"Unknown case: {case!r}. Must be 'channel' or 'cavity'.")
         return ux, uy, p
 
 

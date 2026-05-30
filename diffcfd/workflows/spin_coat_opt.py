@@ -22,7 +22,7 @@ def optimize_spin_profile(
     r_max: float = 0.1,
     nr: int = 40,
     total_time: float = 30.0,
-    dt: float = 0.05,
+    dt: float = 0.001,
     n_epochs: int = 40,
     lr: float = 10.0,
 ) -> dict:

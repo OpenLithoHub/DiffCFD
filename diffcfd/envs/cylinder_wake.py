@@ -84,9 +84,9 @@ class CylinderWakeEnv(DiffCFDEnv):
             device=device,
         )
         self.probe_y = torch.tensor(
-            [self.cyl_cy + 0.1, self.cyl_cy - 0.1] * (n_probes // 4 + 1),
+            [self.cyl_cy + (0.05 + 0.04 * i) * ((-1) ** i) for i in range(n_probes // 2)],
             device=device,
-        )[: n_probes // 2]
+        )
 
         self._solver = NavierStokes2D(
             reynolds_number=re,
@@ -103,6 +103,7 @@ class CylinderWakeEnv(DiffCFDEnv):
 
         self.mesh = self._solver.mesh
         self._sdf = cylinder_sdf(self.mesh, self.cyl_cx, self.cyl_cy, self.cyl_r)
+        self._chi = self._solver.mesh.sdf_to_mask(self._sdf, epsilon=1e-3)
 
         self._step_count = 0
         self._ux: Tensor | None = None
@@ -153,15 +154,13 @@ class CylinderWakeEnv(DiffCFDEnv):
 
         # Compute body velocity field for rotating cylinder in Brinkman region.
         # ω = 2·α·U∞/D; body velocity at (x,y) = ω × r = (-ω·ry, ω·rx)
-        # Note: .detach() is correct here — gradients through rotation → NS flow
-        # are handled by the implicit_diff backward path, not by unrolling.
         if rotation_rate.abs() > 1e-8:
             omega = rotation_rate * 2.0 * self.inlet_velocity / (2 * self.cyl_r)
             x, y = self.mesh.cell_centers()
             rx = x - self.cyl_cx
             ry = y - self.cyl_cy
-            u_body_x = (-omega * ry).detach()
-            u_body_y = (omega * rx).detach()
+            u_body_x = -omega * ry
+            u_body_y = omega * rx
         else:
             u_body_x = None
             u_body_y = None
@@ -203,7 +202,7 @@ class CylinderWakeEnv(DiffCFDEnv):
         dx, dy = self.mesh.dx, self.mesh.dy
 
         # Pressure drag: integrate p * dmask/dx over the domain
-        chi = self._solver.mesh.sdf_to_mask(self._sdf, epsilon=1e-3)
+        chi = self._chi
         dchi_dx = (chi[:, 1:] - chi[:, :-1]) / dx  # (ny, nx-1)
 
         # Pressure at x-faces

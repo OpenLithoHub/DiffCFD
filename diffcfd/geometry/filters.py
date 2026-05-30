@@ -69,8 +69,8 @@ class HelmholtzFilter:
                     vals.append(-r2_over_dx2)
                     diag += r2_over_dx2
                 else:
-                    # Neumann BC: ghost cell = interior cell → -r²/dx² * T_ghost + r²/dx² * T_int = 0 net
-                    diag += 0  # Zero-flux: no extra diagonal contribution
+                    # Neumann BC: ghost cell = interior cell → off-diagonal and diagonal cancel
+                    diag += 0
 
                 # West neighbor
                 if i - 1 >= 0:
@@ -163,6 +163,11 @@ class HelmholtzFilter:
             rho_pad[-1, 1:-1] = rho_f[-1, :]
             rho_pad[1:-1, 0] = rho_f[:, 0]
             rho_pad[1:-1, -1] = rho_f[:, -1]
+            # Corner ghost cells: Neumann from both directions
+            rho_pad[0, 0] = rho_f[0, 0]
+            rho_pad[0, -1] = rho_f[0, -1]
+            rho_pad[-1, 0] = rho_f[-1, 0]
+            rho_pad[-1, -1] = rho_f[-1, -1]
 
             laplacian = r2_dx2 * (
                 rho_pad[1:-1, 2:] + rho_pad[1:-1, :-2] - 2 * rho_f

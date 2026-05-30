@@ -22,7 +22,7 @@ RAD_TO_RPM = 60.0 / (2.0 * math.pi)
 def optimize_joint_process(
     target_developed_h_nm: float = 50.0,
     total_spin_time: float = 10.0,
-    spin_dt: float = 0.05,
+    spin_dt: float = 0.001,
     n_epochs: int = 50,
 ) -> dict:
     """Jointly optimize spin-coating speed profile AND litho exposure dose."""

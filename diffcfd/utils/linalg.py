@@ -43,6 +43,7 @@ def gmres_matfree(
         x: Solution tensor, shape (N,).
         iters: Number of iterations used.
     """
+    import warnings as _warnings
     dtype = b.dtype
     device = b.device
     b_norm = b.norm()
@@ -128,6 +129,15 @@ def gmres_matfree(
         # Compute residual for next restart cycle (avoids redundant matvec)
         r = b - matvec(x)
 
+    if not converged and total_iters > 0:
+        final_res = r.norm() / b_norm if r is not None else float("inf")
+        _warnings.warn(
+            f"gmres_matfree did not converge: {total_iters} iters, "
+            f"final rel residual = {final_res:.2e} (tol = {tol:.2e})",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
     return x, total_iters
 
 
@@ -176,7 +186,7 @@ def scipy_gmres(
         rtol=tol,
         maxiter=max_iter,
         callback=callback,
-        callback_type="legacy",
+        callback_type="x",
     )
     x = torch.tensor(x_np, dtype=b.dtype, device=b.device)
     return x, iters_count[0]

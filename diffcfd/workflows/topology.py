@@ -128,6 +128,17 @@ def optimize_topology(
 
     optimizer = torch.optim.Adam([rho_raw], lr=lr)
 
+    # Pre-load convergence action enum if monitor is provided
+    _ConvergenceAction = None
+    if convergence_monitor is not None:
+        try:
+            from diff_surrogate.convergence import ConvergenceAction as _ConvergenceAction
+        except ImportError as e:
+            raise ImportError(
+                "convergence_monitor requires the 'diff-surrogate' package. "
+                "Install with: pip install diff-surrogate"
+            ) from e
+
     history = {"objective": [], "fluid_fraction": [], "penalty": []}
 
     for step in range(n_steps):
@@ -184,22 +195,14 @@ def optimize_topology(
                 f"penalty={vol_penalty.item():.4f}"
             )
 
-        # Convergence monitoring (B.1)
+            # Convergence monitoring (B.1)
         if convergence_monitor is not None:
-            try:
-                from diff_surrogate.convergence import ConvergenceAction
-            except ImportError as e:
-                raise ImportError(
-                    "convergence_monitor requires the 'diff-surrogate' package. "
-                    "Install with: pip install diff-surrogate"
-                ) from e
-
             action = convergence_monitor.update(dp.abs().item(), step)
-            if action == ConvergenceAction.EARLY_STOP:
+            if action == _ConvergenceAction.EARLY_STOP:
                 if verbose:
                     print(f"  >> Convergence: early stop at step {step}")
                 break
-            elif action == ConvergenceAction.REDUCE_LR:
+            elif action == _ConvergenceAction.REDUCE_LR:
                 for pg in optimizer.param_groups:
                     pg["lr"] *= 0.5
                 if verbose:
@@ -368,6 +371,16 @@ def multi_corner_optimize(
 
     optimizer = torch.optim.Adam([rho_raw], lr=lr)
 
+    _ConvergenceAction = None
+    if convergence_monitor is not None:
+        try:
+            from diff_surrogate.convergence import ConvergenceAction as _ConvergenceAction
+        except ImportError as e:
+            raise ImportError(
+                "convergence_monitor requires the 'diff-surrogate' package. "
+                "Install with: pip install diff-surrogate"
+            ) from e
+
     history: dict = {
         "combined": [],
         "fluid_fraction": [],
@@ -446,16 +459,8 @@ def multi_corner_optimize(
 
         # Convergence monitoring
         if convergence_monitor is not None:
-            try:
-                from diff_surrogate.convergence import ConvergenceAction
-            except ImportError as e:
-                raise ImportError(
-                    "convergence_monitor requires the 'diff-surrogate' package. "
-                    "Install with: pip install diff-surrogate"
-                ) from e
-
             action = convergence_monitor.update(combined_loss.item(), step)
-            if action == ConvergenceAction.EARLY_STOP:
+            if action == _ConvergenceAction.EARLY_STOP:
                 convergence_info = {
                     "early_stopped": True,
                     "step": step,
@@ -464,7 +469,7 @@ def multi_corner_optimize(
                 if verbose:
                     print(f"  >> Convergence: early stop at step {step}")
                 break
-            elif action == ConvergenceAction.REDUCE_LR:
+            elif action == _ConvergenceAction.REDUCE_LR:
                 for pg in optimizer.param_groups:
                     pg["lr"] *= 0.5
                 if verbose:

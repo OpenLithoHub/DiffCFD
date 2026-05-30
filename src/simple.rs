@@ -1,11 +1,6 @@
 use numpy::{PyReadonlyArray2, PyArray1};
 use pyo3::prelude::*;
-
-/// Hybrid upwind scheme.
-#[inline(always)]
-fn hybrid(F: f64, D: f64) -> f64 {
-    (D - 0.5 * F.abs()).max(0.0) + (-F).max(0.0)
-}
+use crate::utils::hybrid;
 
 /// Full SIMPLE steady-state solver in Rust.
 /// Returns (ux_flat, uy_flat, p_flat) as 1D NumPy arrays (reshape in Python).
@@ -36,10 +31,10 @@ pub fn solve_steady_simple<'py>(
 )> {
     // Convert ndarray views to contiguous f64 vecs
     let bk_vec = brinkman.as_slice()?.to_vec();
-    let nu_f_vec: Option<Vec<f64>> = nu_field.map(|a| a.as_slice().unwrap().to_vec());
-    let ubx_vec: Option<Vec<f64>> = u_body_x.map(|a| a.as_slice().unwrap().to_vec());
-    let uby_vec: Option<Vec<f64>> = u_body_y.map(|a| a.as_slice().unwrap().to_vec());
-    let buoy_vec: Option<Vec<f64>> = buoyancy_src.map(|a| a.as_slice().unwrap().to_vec());
+    let nu_f_vec: Option<Vec<f64>> = nu_field.map(|a| a.as_slice().map(|s| s.to_vec())).transpose()?;
+    let ubx_vec: Option<Vec<f64>> = u_body_x.map(|a| a.as_slice().map(|s| s.to_vec())).transpose()?;
+    let uby_vec: Option<Vec<f64>> = u_body_y.map(|a| a.as_slice().map(|s| s.to_vec())).transpose()?;
+    let buoy_vec: Option<Vec<f64>> = buoyancy_src.map(|a| a.as_slice().map(|s| s.to_vec())).transpose()?;
 
     let mut ux = vec![0.0f64; ny * (nx + 1)];
     let mut uy = vec![0.0f64; (ny + 1) * nx];
@@ -388,8 +383,13 @@ fn build_pressure_triplets(
     Trips { rows, cols, vals, n }
 }
 
-/// Dense LU solve from COO-format sparse matrix (for moderate-size 2D grids).
+/// Dense LU solve from COO-format sparse matrix.
+/// Suitable for 2D CFD grids up to ~128x128 (N ~ 16K, matrix ~ 2GB).
+/// For larger grids, consider switching to a sparse iterative solver.
 fn dense_solve_coo(rows: &[usize], cols: &[usize], vals: &[f64], b: &[f64], n: usize) -> Vec<f64> {
+    if n > 20000 {
+        eprintln!("Warning: dense LU solve with n={n} may be slow and memory-intensive. Consider using a sparse solver for grids > 128x128.");
+    }
     let mut a = vec![0.0f64; n * n];
     for idx in 0..rows.len() {
         a[rows[idx] * n + cols[idx]] += vals[idx];

@@ -59,8 +59,8 @@ class NACA4Digit:
             SDF tensor (ny, nx). Positive in fluid, negative in solid.
         """
         if camber < 1e-8:
-            # Symmetric airfoil (NACA 00xx)
-            return naca0012_sdf(mesh, self.chord, self.le_x, self.cy, self.angle)
+            # Symmetric airfoil (NACA 00xx) — use actual thickness parameter
+            return naca0012_sdf(mesh, self.chord, self.le_x, self.cy, self.angle, thickness=thickness)
 
         # Cambered airfoil: compute camber line and add thickness
         x, y = mesh.cell_centers()

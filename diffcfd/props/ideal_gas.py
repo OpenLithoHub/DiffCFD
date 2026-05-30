@@ -57,19 +57,22 @@ class ConstantProps(ThermophysicalProps):
         k: float = 1.0,
         cp: float = 1.0,
     ) -> None:
-        self._rho = torch.tensor(rho)
-        self._mu = torch.tensor(mu)
-        self._k = torch.tensor(k)
-        self._cp = torch.tensor(cp)
+        self._rho_val = rho
+        self._mu_val = mu
+        self._k_val = k
+        self._cp_val = cp
+
+    def _tensor(self, val: float, ref: Tensor) -> Tensor:
+        return torch.tensor(val, dtype=ref.dtype, device=ref.device).expand_as(ref)
 
     def density(self, T: Tensor, p: Tensor) -> Tensor:
-        return self._rho.expand_as(T)
+        return self._tensor(self._rho_val, T)
 
     def viscosity(self, T: Tensor, p: Tensor) -> Tensor:
-        return self._mu.expand_as(T)
+        return self._tensor(self._mu_val, T)
 
     def conductivity(self, T: Tensor, p: Tensor) -> Tensor:
-        return self._k.expand_as(T)
+        return self._tensor(self._k_val, T)
 
     def specific_heat(self, T: Tensor, p: Tensor) -> Tensor:
-        return self._cp.expand_as(T)
+        return self._tensor(self._cp_val, T)

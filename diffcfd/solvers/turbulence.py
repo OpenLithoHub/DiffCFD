@@ -100,7 +100,15 @@ class FrozenEddyViscosity:
             device: PyTorch device.
         """
         import math
+        import warnings
 
+        if Re < 4000:
+            warnings.warn(
+                f"Blasius correlation used at Re={Re:.0f}, but is only valid for "
+                f"Re in [4000, 100000]. Results may be inaccurate.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         f = 0.316 * Re ** (-0.25)
         u_tau = U_bulk * math.sqrt(f / 2)
         nu = U_bulk * ly / Re

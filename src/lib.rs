@@ -4,6 +4,7 @@ mod momentum;
 mod pressure;
 mod sdf;
 mod simple;
+mod utils;
 
 #[pymodule]
 fn _diffcfd_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {

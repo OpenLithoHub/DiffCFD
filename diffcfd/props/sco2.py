@@ -80,11 +80,13 @@ def classify_point(
 
 
 class _MonotoneMLP(nn.Module):
-    """Small MLP with positive final-layer weights for monotonicity.
+    """Small MLP with positive final-layer weights for soft monotonicity bias.
 
-    The last linear layer has weights constrained positive via abs(),
-    ensuring the output is monotonically increasing with the input feature
-    that corresponds to temperature.
+    The last linear layer has weights constrained positive via abs(), which
+    biases the output toward monotonicity but does NOT guarantee it, since
+    hidden-layer weights are unconstrained. Provides a useful inductive bias
+    for density (monotonically decreasing w.r.t. T at fixed p) when combined
+    with appropriate training.
     """
 
     def __init__(self, in_dim: int, hidden: int, out_dim: int) -> None:
@@ -97,7 +99,7 @@ class _MonotoneMLP(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         h = torch.relu(self.fc1(x))
         h = torch.relu(self.fc2(h))
-        # Positive weights ensure monotonicity w.r.t. input features
+        # Positive weights provide monotonicity bias (not a hard guarantee)
         w_pos = self.fc3_weight.abs()
         return torch.nn.functional.linear(h, w_pos, self.fc3_bias)
 

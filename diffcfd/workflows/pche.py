@@ -113,6 +113,9 @@ def optimize_pche(
         device=device,
     )
     y_pos = y_init.clone().detach().requires_grad_(True)
+    # Inverse sigmoid to get unconstrained initial values
+    y_pos = ((y_pos - channel_radius) / (ly - 2 * channel_radius)).clamp(1e-4, 1 - 1e-4)
+    y_pos = (y_pos / (1 - y_pos)).log().detach().requires_grad_(True)
 
     optimizer = torch.optim.Adam([y_pos], lr=lr)
 
@@ -127,8 +130,8 @@ def optimize_pche(
     for step in range(n_steps):
         optimizer.zero_grad()
 
-        # Clamp positions to stay within domain
-        y_clamped = torch.clamp(y_pos, channel_radius, ly - channel_radius)
+        # Soft constraint: map positions to valid range via sigmoid
+        y_clamped = channel_radius + (ly - 2 * channel_radius) * torch.sigmoid(y_pos)
 
         # Build channel SDF
         sdf = _pche_channel_sdf(mesh, y_clamped, channel_radius)

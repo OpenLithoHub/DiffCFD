@@ -66,8 +66,9 @@ def naca0012_sdf(
     leading_edge_x: float = 0.25,
     center_y: float = 0.5,
     angle_deg: float = 0.0,
+    thickness: float = 0.12,
 ) -> Tensor:
-    """SDF for a NACA 0012 airfoil.
+    """SDF for a NACA symmetric airfoil.
 
     Args:
         mesh: CartesianMesh instance.
@@ -75,6 +76,7 @@ def naca0012_sdf(
         leading_edge_x: x-position of leading edge.
         center_y: y-position of chord line.
         angle_deg: Angle of attack in degrees.
+        thickness: Maximum thickness as fraction of chord (default 0.12 for NACA 0012).
     """
     x, y = mesh.cell_centers()
     theta = torch.tensor(angle_deg * 3.14159265 / 180.0, device=mesh.device)
@@ -85,13 +87,12 @@ def naca0012_sdf(
     x_rot = dx * torch.cos(theta) + dy * torch.sin(theta) + chord / 2
     y_rot = -dx * torch.sin(theta) + dy * torch.cos(theta)
 
-    # NACA 0012 thickness distribution: t/c = 5*0.12*(0.2969*sqrt(x) - 0.1260*x - 0.3516*x^2 + 0.2843*x^3 - 0.1015*x^4)
-    # Normalized x/c
+    # NACA thickness distribution: t/c = 5*t*(0.2969*sqrt(x) - 0.1260*x - 0.3516*x^2 + 0.2843*x^3 - 0.1015*x^4)
     xn = x_rot / chord
     xn = torch.clamp(xn, 0.0, 1.0)
     half_thickness = (
         chord
-        * 0.12
+        * thickness
         / 0.2
         * (
             0.2969 * torch.sqrt(xn + 1e-10)

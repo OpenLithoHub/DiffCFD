@@ -76,16 +76,16 @@ def save_vtk(
         f.write("DiffCFD output\n")
         f.write("ASCII\n")
         f.write("DATASET RECTILINEAR_GRID\n")
-        f.write(f"DIMENSIONS {nx} {ny} 1\n")
+        f.write(f"DIMENSIONS {nx + 1} {ny + 1} 1\n")
 
-        f.write(f"X_COORDINATES {nx} double\n")
-        for i in range(nx):
-            f.write(f"{(i + 0.5) * dx:.10e} ")
+        f.write(f"X_COORDINATES {nx + 1} double\n")
+        for i in range(nx + 1):
+            f.write(f"{i * dx:.10e} ")
         f.write("\n")
 
-        f.write(f"Y_COORDINATES {ny} double\n")
-        for j in range(ny):
-            f.write(f"{(j + 0.5) * dy:.10e} ")
+        f.write(f"Y_COORDINATES {ny + 1} double\n")
+        for j in range(ny + 1):
+            f.write(f"{j * dy:.10e} ")
         f.write("\n")
 
         f.write("Z_COORDINATES 1 double\n")
