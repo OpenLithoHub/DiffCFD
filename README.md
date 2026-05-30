@@ -18,6 +18,9 @@ PyTorch-native differentiable fluid dynamics — **matrix-free implicit differen
 - No third-party experimental validation. All results are self-measured on a single workstation.
 - Spin-coating flagship benchmark: post-K1 fix verified 10/10 valid seeds (0% NaN rate, previously 70%). Wilcoxon p=0.002 confirms joint optimization advantage.
 
+**Known stubs / unimplemented:**
+- No solver-level stubs in DiffCFD. All core solvers (NS, heat transfer, implicit diff) are functional and validated.
+
 </div>
 
 ---
@@ -240,6 +243,18 @@ All data below were measured on **AMD Ryzen 5 5600G (6 cores), 13 GB RAM, Ubuntu
 | sCO2 surrogate | Yes | No | No | No | No | No |
 
 > **Comparability note:** The memory scaling claim (O(N·k)) is a structural property of restarted GMRES, not a measured speedup over other tools. Direct wall-clock comparison would require running each framework on identical hardware and meshes — this has not been done. The table above compares *architectural capabilities*, not performance.
+
+#### Additional Related Work (2025–2026)
+
+| Reference | Venue / Year | Relevance |
+|:----------|:-------------|:----------|
+| Differentiable supercritical topology optimization | 2026 | Polynomial thermodynamic models for sCO₂ transcritical optimization |
+| OpenMDAO/MPhys CHT | 2026 | Modular discrete adjoint conjugate heat transfer framework |
+| GAOT v4 | NeurIPS 2025, arXiv:2505.18781 | Multi-scale attention geometry-aware operator transformer |
+| GINOT | CMAME 2026 | Surface point-cloud encoding + cross-attention geometry injection for neural operators |
+| DNOT | Eng. with Computers 42:60, 2026 | Feature-diffusion enhanced neural operator transformer |
+| DD-DeepONet | Eng. Appl. Artif. Intell. 2026 | Domain decomposition DeepONet |
+| Schwarz Neural Inference | arXiv:2504.00510 v2, 2026-02 | Local→global domain decomposition operator learning |
 >
 > **DiffCFD's differentiation:** PyTorch-native (vs JAX in most others), steady-state implicit differentiation (vs transient-only in all JAX frameworks), `gymnasium.Env` RL integration, conjugate heat transfer, and sCO2 transcritical property surrogate — all on CPU without GPU requirement.
 >
