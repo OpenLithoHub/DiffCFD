@@ -21,6 +21,21 @@ PyTorch-native differentiable fluid dynamics — **matrix-free implicit differen
 **Known stubs / unimplemented:**
 - No solver-level stubs in DiffCFD. All core solvers (NS, heat transfer, implicit diff) are functional and validated.
 
+### Variable-Property Conjugate Heat Transfer
+
+`HeatTransfer2D.solve_differentiable()` now supports a variable-property mode via the `props` parameter. When a `ThermophysicalProps` instance (e.g., `SCO2Surrogate`) is provided, the thermal diffusivity α is recomputed from local (T, p) at each iteration rather than using a constant value. This integrates the sCO₂ differentiable property surrogate directly into the conjugate heat transfer solver for transcritical optimization workflows.
+
+```python
+from diffcfd import HeatTransfer2D, SCO2Surrogate
+
+props = SCO2Surrogate()
+solver = HeatTransfer2D(grid=(64, 64))
+T = solver.solve_differentiable(
+    T_hot=800.0, T_cold=600.0, pressure=8.0e6,
+    props=props,  # α recomputed from local (T, p) each iteration
+)
+```
+
 </div>
 
 ---
