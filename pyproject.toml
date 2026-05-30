@@ -8,9 +8,9 @@ version = "0.7.0"
 description = "Differentiable Computational Fluid Dynamics for Steady-State Inverse Design and Reinforcement Learning"
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
-    "torch>=2.0",
+    "torch>=2.12",
     "numpy",
     "scipy",
     "gymnasium>=0.26",

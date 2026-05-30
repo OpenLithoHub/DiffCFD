@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg)](https://pytorch.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.12%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-maturin-orange.svg)](https://www.rust-lang.org/)
 
 PyTorch-native differentiable fluid dynamics — **matrix-free implicit differentiation** through SIMPLE-converged steady states with **O(N) memory**, plus gradient-attached `gymnasium.Env` for RL.
@@ -73,7 +73,7 @@ Use cases:
 ### Installation
 
 ```bash
-# Requires Python 3.9+, PyTorch 2.0+, and a Rust toolchain
+# Requires Python 3.10+, PyTorch 2.12+, and a Rust toolchain
 pip install maturin torch numpy scipy gymnasium
 maturin develop --release     # compiles Rust kernels (one-time, ~30 s)
 ```
@@ -238,6 +238,29 @@ The K1 fix (semi-implicit integration + adaptive dt + finite guard) eliminated t
 | `torch.autograd.gradcheck` (Poiseuille) | 1 | passes | passes | Pass |
 | Pure conduction Nusselt number | — | Nu = 1.0 | 1.0000 | Pass |
 | Backward-facing step (Brinkman) | 100 | bounded, recirculating | pass | Pass |
+
+### Flagship Evidence Status
+
+| Claim | Code | Tests | Data | Status |
+|:------|:-----|:------|:-----|:-------|
+| Joint litho-CFD optimization (`optimize_joint_process`) | `diffcfd/workflows/joint_litho_opt.py` | `tests/unit/test_joint_litho.py`, `tests/unit/test_flagship_flow_litho.py` | `flagship_flow_litho_results.json` (10-seed sweep) | Verified |
+| Process window analysis (`process_window_analysis`) | `diffcfd/workflows/joint_litho_opt.py` | `tests/unit/test_flagship_flow_litho.py` | `flagship_flow_litho_results.json` | Verified |
+| sCO2 transcritical property surrogate (`SCO2Surrogate`) | `diffcfd/props/sco2.py` | `tests/unit/test_sco2.py` | README Table 4 (measured 14.4 s training) | Verified |
+| Variable-property conjugate heat transfer (`HeatTransfer2D` + `props`) | `diffcfd/solvers/heat_transfer.py` | `tests/unit/test_heat_transfer.py` | README Table 4 (accuracy numbers) | Verified |
+| Matrix-free implicit differentiation (GMRES) | `diffcfd/solvers/implicit_diff.py` | `tests/validation/test_gradients.py` | README Table 3 (measured gradient accuracy) | Verified |
+| Rust-accelerated forward kernels | `src/momentum.rs`, `src/pressure.rs`, `src/simple.rs` | `tests/validation/test_lid_driven_cavity.py` | README Table 2 (measured wall-clock) | Verified |
+| FNO surrogate-in-the-loop | `diffcfd/surrogates/fno.py` | `tests/unit/test_surrogates.py` | Internal | Verified |
+| Topology optimization | `diffcfd/workflows/topology.py` | `tests/unit/test_filters.py` | Quick Start example output | Verified |
+
+### Compatibility
+
+| Dependency | Version |
+|:-----------|:--------|
+| Python | 3.10+ |
+| PyTorch | 2.12+ |
+| diff-surrogate | 0.2.0 |
+
+**Sister projects:** [DiffNano](https://github.com/OpenLithoHub/DiffNano) (nanophotonics), [OpenLithoHub](https://github.com/OpenLithoHub/OpenLithoHub) (lithography benchmarking), [diff-surrogate](https://github.com/telleroutlook/diff-surrogate) (shared surrogate framework).
 
 ---
 
