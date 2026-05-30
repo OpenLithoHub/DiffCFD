@@ -39,4 +39,6 @@ computed_grad = u_inlet.grad.item()
 print(f"Pressure drop:  {dp.item():.4f}")
 print(f"Analytical:     dΔP/dU = {analytical_grad}")
 print(f"Computed:       dΔP/dU = {computed_grad:.4f}")
-print(f"Relative error: {abs(computed_grad - analytical_grad) / analytical_grad * 100:.4f}%")
+print(
+    f"Relative error: {abs(computed_grad - analytical_grad) / analytical_grad * 100:.4f}%"
+)

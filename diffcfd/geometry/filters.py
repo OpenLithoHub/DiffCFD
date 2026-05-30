@@ -59,12 +59,13 @@ class HelmholtzFilter:
             for i in range(nx):
                 k = j * nx + i
                 diag = 1.0  # Identity contribution
-                r2_over_dx2 = r ** 2 / dx ** 2
-                r2_over_dy2 = r ** 2 / dy ** 2
+                r2_over_dx2 = r**2 / dx**2
+                r2_over_dy2 = r**2 / dy**2
 
                 # East neighbor
                 if i + 1 < nx:
-                    rows.append(k); cols.append(k + 1)
+                    rows.append(k)
+                    cols.append(k + 1)
                     vals.append(-r2_over_dx2)
                     diag += r2_over_dx2
                 else:
@@ -73,28 +74,34 @@ class HelmholtzFilter:
 
                 # West neighbor
                 if i - 1 >= 0:
-                    rows.append(k); cols.append(k - 1)
+                    rows.append(k)
+                    cols.append(k - 1)
                     vals.append(-r2_over_dx2)
                     diag += r2_over_dx2
 
                 # North neighbor
                 if j + 1 < ny:
-                    rows.append(k); cols.append(k + nx)
+                    rows.append(k)
+                    cols.append(k + nx)
                     vals.append(-r2_over_dy2)
                     diag += r2_over_dy2
 
                 # South neighbor
                 if j - 1 >= 0:
-                    rows.append(k); cols.append(k - nx)
+                    rows.append(k)
+                    cols.append(k - nx)
                     vals.append(-r2_over_dy2)
                     diag += r2_over_dy2
 
-                rows.append(k); cols.append(k)
+                rows.append(k)
+                cols.append(k)
                 vals.append(diag)
 
         return sp.csr_matrix(
-            (np.array(vals), (np.array(rows, dtype=np.int32),
-                              np.array(cols, dtype=np.int32))),
+            (
+                np.array(vals),
+                (np.array(rows, dtype=np.int32), np.array(cols, dtype=np.int32)),
+            ),
             shape=(n, n),
         )
 
@@ -120,7 +127,8 @@ class HelmholtzFilter:
         rho_filtered_np = spla.spsolve(self._L, rho_np)
         return torch.tensor(
             rho_filtered_np.reshape(ny, nx),
-            dtype=rho.dtype, device=rho.device,
+            dtype=rho.dtype,
+            device=rho.device,
         )
 
     def apply_differentiable(self, rho: Tensor, n_iter: int = 50) -> Tensor:
@@ -141,8 +149,8 @@ class HelmholtzFilter:
         dev = rho.device
         dt = rho.dtype
 
-        r2_dx2 = r ** 2 / dx ** 2
-        r2_dy2 = r ** 2 / dy ** 2
+        r2_dx2 = r**2 / dx**2
+        r2_dy2 = r**2 / dy**2
         diag = 1.0 + 2 * r2_dx2 + 2 * r2_dy2
 
         rho_f = rho.clone()
@@ -156,15 +164,16 @@ class HelmholtzFilter:
             rho_pad[1:-1, 0] = rho_f[:, 0]
             rho_pad[1:-1, -1] = rho_f[:, -1]
 
-            laplacian = (
-                r2_dx2 * (rho_pad[1:-1, 2:] + rho_pad[1:-1, :-2] - 2 * rho_f)
-                + r2_dy2 * (rho_pad[2:, 1:-1] + rho_pad[:-2, 1:-1] - 2 * rho_f)
-            )
+            laplacian = r2_dx2 * (
+                rho_pad[1:-1, 2:] + rho_pad[1:-1, :-2] - 2 * rho_f
+            ) + r2_dy2 * (rho_pad[2:, 1:-1] + rho_pad[:-2, 1:-1] - 2 * rho_f)
 
-            rho_f = (rho + laplacian + diag * rho_f - diag * rho_f + rho_f) / diag
-            # Simplification: rho_f = (rho + laplacian) / diag  is wrong
-            # Correct: (I - r²∇²) rho_f = rho → rho_f = (rho + r²∇² rho_f) / diag
-            rho_f = (rho + r2_dx2 * (rho_pad[1:-1, 2:] + rho_pad[1:-1, :-2])
-                     + r2_dy2 * (rho_pad[2:, 1:-1] + rho_pad[:-2, 1:-1])) / diag
+            # (I - r²∇²) rho_f = rho  →  rho_f = (rho + r²∇² rho_f) / diag
+            # where diag = 1 + 2*r²/dx² + 2*r²/dy² (interior cells)
+            rho_f = (
+                rho
+                + r2_dx2 * (rho_pad[1:-1, 2:] + rho_pad[1:-1, :-2])
+                + r2_dy2 * (rho_pad[2:, 1:-1] + rho_pad[:-2, 1:-1])
+            ) / diag
 
         return rho_f

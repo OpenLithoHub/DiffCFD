@@ -52,10 +52,7 @@ class BoundaryConditions:
             ux clone with column 0 set to profile.
         """
         out = ux.clone()
-        if isinstance(profile, Tensor):
-            out[:, 0] = profile
-        else:
-            out[:, 0] = profile
+        out[:, 0] = profile
         return out
 
     def apply_no_slip_walls(self, ux: Tensor, uy: Tensor) -> tuple[Tensor, Tensor]:
@@ -122,7 +119,9 @@ class BoundaryConditions:
         out[:, -1] = out[:, -2]
         return out
 
-    def apply_pressure_reference(self, p: Tensor, ref_i: int = 0, ref_j: int = 0) -> Tensor:
+    def apply_pressure_reference(
+        self, p: Tensor, ref_i: int = 0, ref_j: int = 0
+    ) -> Tensor:
         """Pin pressure at one cell to remove the rank-1 null space of the Poisson equation.
 
         Shifts the entire pressure field so that p[ref_j, ref_i] = 0.

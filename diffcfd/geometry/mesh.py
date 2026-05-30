@@ -45,11 +45,17 @@ class CartesianMesh:
 
     def cell_centers(self) -> tuple[Tensor, Tensor]:
         """Return (x, y) meshgrid tensors at cell centers, shape (ny, nx)."""
-        x = torch.linspace(self.dx / 2, self.lx - self.dx / 2, self.nx, device=self.device)
-        y = torch.linspace(self.dy / 2, self.ly - self.dy / 2, self.ny, device=self.device)
+        x = torch.linspace(
+            self.dx / 2, self.lx - self.dx / 2, self.nx, device=self.device
+        )
+        y = torch.linspace(
+            self.dy / 2, self.ly - self.dy / 2, self.ny, device=self.device
+        )
         return torch.meshgrid(x, y, indexing="xy")
 
-    def sdf_to_mask(self, sdf: Tensor, epsilon: float = 1e-3, beta: float = 32.0) -> Tensor:
+    def sdf_to_mask(
+        self, sdf: Tensor, epsilon: float = 1e-3, beta: float = 32.0
+    ) -> Tensor:
         """Convert a signed distance field to a smooth Brinkman fluid mask χ(φ).
 
         χ = 1 in fluid (φ > 0), χ = 0 in solid (φ < 0).
@@ -59,8 +65,8 @@ class CartesianMesh:
 
         Args:
             sdf: Signed distance field tensor (ny, nx). Positive inside fluid.
-            epsilon: Brinkman penalization coefficient.  Not used here (passed to
-                     the momentum equation externally); kept for API consistency.
+            epsilon: Brinkman penalization coefficient (used externally by the
+                     momentum equation; accepted here for call-site compatibility).
             beta: Heaviside sharpness.  β=1 → very smooth; β=32 → near step function.
 
         Returns:

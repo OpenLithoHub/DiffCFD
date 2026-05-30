@@ -27,6 +27,12 @@ from diffcfd.geometry.mesh import CartesianMesh
 class HeatTransfer2D:
     """Steady-state energy equation on a structured MAC grid.
 
+    Two solve paths:
+      - solve(): scipy sparse direct solve (fast, not differentiable).
+        Use for forward-only data generation and inference.
+      - solve_differentiable(): PyTorch Jacobi iteration (differentiable).
+        Use inside optimization loops where gradients must flow through.
+
     Args:
         mesh: CartesianMesh instance.
         alpha: Thermal diffusivity k/(ρ·cp) [m²/s].
@@ -95,12 +101,12 @@ class HeatTransfer2D:
         rows, cols, vals = [], [], []
         b = np.zeros(n, dtype=np.float64)
 
-        def I(j, i):
+        def idx(j, i):
             return j * nx + i
 
         for j in range(ny):
             for i in range(nx):
-                k = I(j, i)
+                row = idx(j, i)
 
                 # Cell-center velocity (average of faces)
                 u_c = 0.5 * (ux_np[j, i] + ux_np[j, i + 1])
@@ -161,7 +167,9 @@ class HeatTransfer2D:
 
                 # East neighbor
                 if i + 1 < nx:
-                    rows.append(k); cols.append(I(j, i + 1)); vals.append(-a_e)
+                    rows.append(row)
+                    cols.append(idx(j, i + 1))
+                    vals.append(-a_e)
                     diag += a_e
                 else:
                     bc_type, bc_val = T_bc.get("right", ("neumann", 0.0))
@@ -171,7 +179,9 @@ class HeatTransfer2D:
 
                 # West neighbor
                 if i - 1 >= 0:
-                    rows.append(k); cols.append(I(j, i - 1)); vals.append(-a_w)
+                    rows.append(row)
+                    cols.append(idx(j, i - 1))
+                    vals.append(-a_w)
                     diag += a_w
                 else:
                     bc_type, bc_val = T_bc.get("left", ("neumann", 0.0))
@@ -181,7 +191,9 @@ class HeatTransfer2D:
 
                 # North neighbor
                 if j + 1 < ny:
-                    rows.append(k); cols.append(I(j + 1, i)); vals.append(-a_n)
+                    rows.append(row)
+                    cols.append(idx(j + 1, i))
+                    vals.append(-a_n)
                     diag += a_n
                 else:
                     bc_type, bc_val = T_bc.get("top", ("dirichlet", 1.0))
@@ -191,7 +203,9 @@ class HeatTransfer2D:
 
                 # South neighbor
                 if j - 1 >= 0:
-                    rows.append(k); cols.append(I(j - 1, i)); vals.append(-a_s)
+                    rows.append(row)
+                    cols.append(idx(j - 1, i))
+                    vals.append(-a_s)
                     diag += a_s
                 else:
                     bc_type, bc_val = T_bc.get("bottom", ("dirichlet", 0.0))
@@ -199,17 +213,22 @@ class HeatTransfer2D:
                         src += a_s * bc_val
                         diag += a_s
 
-                rows.append(k); cols.append(k); vals.append(diag)
-                b[k] = src
+                rows.append(row)
+                cols.append(row)
+                vals.append(diag)
+                b[row] = src
 
         A = sp.csr_matrix(
-            (np.array(vals), (np.array(rows, dtype=np.int32),
-                              np.array(cols, dtype=np.int32))),
+            (
+                np.array(vals),
+                (np.array(rows, dtype=np.int32), np.array(cols, dtype=np.int32)),
+            ),
             shape=(n, n),
         )
         T_flat = spla.spsolve(A, b)
-        return torch.tensor(T_flat.reshape(ny, nx), dtype=torch.float32,
-                            device=ux.device)
+        return torch.tensor(
+            T_flat.reshape(ny, nx), dtype=torch.float32, device=ux.device
+        )
 
     def solve_differentiable(
         self,
@@ -251,20 +270,6 @@ class HeatTransfer2D:
         T = torch.zeros(ny, nx, device=dev, dtype=ux.dtype)
 
         # Initialize with linear interpolation between Dirichlet BCs
-        for wall, (bc_type, bc_val) in T_bc.items():
-            if bc_type == "dirichlet":
-                if wall == "bottom":
-                    # Don't set T[0] = bc_val — Dirichlet is at the wall (y=0),
-                    # T[0] is at cell center (y=dy/2). Initialize with small value.
-                    pass
-                elif wall == "top":
-                    pass
-                elif wall == "left":
-                    pass
-                elif wall == "right":
-                    pass
-
-        # Simple initialization for vertical conduction
         bc_bottom = T_bc.get("bottom", ("neumann", 0.0))
         bc_top = T_bc.get("top", ("neumann", 1.0))
         if bc_bottom[0] == "dirichlet" and bc_top[0] == "dirichlet":
@@ -275,9 +280,9 @@ class HeatTransfer2D:
         # Pre-compute face velocities on staggered MAC grid:
         # ux is on x-faces: shape (ny, nx+1). East face of cell (j,i) = ux[j, i+1], west = ux[j, i].
         # uy is on y-faces: shape (ny+1, nx). North face of cell (j,i) = uy[j+1, i], south = uy[j, i].
-        u_east = ux[:, 1:]    # (ny, nx) velocity at east face of each cell
-        u_west = ux[:, :-1]   # (ny, nx) velocity at west face of each cell
-        v_north = uy[1:, :]   # (ny, nx) velocity at north face of each cell
+        u_east = ux[:, 1:]  # (ny, nx) velocity at east face of each cell
+        u_west = ux[:, :-1]  # (ny, nx) velocity at west face of each cell
+        v_north = uy[1:, :]  # (ny, nx) velocity at north face of each cell
         v_south = uy[:-1, :]  # (ny, nx) velocity at south face of each cell
 
         # Boundary condition masks (constant across iterations)
@@ -342,10 +347,18 @@ class HeatTransfer2D:
             D_s = torch.full((ny, nx), D_base_y, device=dev, dtype=ux.dtype)
 
             # Hybrid upwind scheme
-            a_e = torch.clamp(D_e - 0.5 * F_e.abs(), min=0.0) + torch.clamp(-F_e, min=0.0)
-            a_w = torch.clamp(D_w - 0.5 * F_w.abs(), min=0.0) + torch.clamp(F_w, min=0.0)
-            a_n = torch.clamp(D_n - 0.5 * F_n.abs(), min=0.0) + torch.clamp(-F_n, min=0.0)
-            a_s = torch.clamp(D_s - 0.5 * F_s.abs(), min=0.0) + torch.clamp(F_s, min=0.0)
+            a_e = torch.clamp(D_e - 0.5 * F_e.abs(), min=0.0) + torch.clamp(
+                -F_e, min=0.0
+            )
+            a_w = torch.clamp(D_w - 0.5 * F_w.abs(), min=0.0) + torch.clamp(
+                F_w, min=0.0
+            )
+            a_n = torch.clamp(D_n - 0.5 * F_n.abs(), min=0.0) + torch.clamp(
+                -F_n, min=0.0
+            )
+            a_s = torch.clamp(D_s - 0.5 * F_s.abs(), min=0.0) + torch.clamp(
+                F_s, min=0.0
+            )
 
             a_P = a_e + a_w + a_n + a_s + 1e-30
 
@@ -442,8 +455,10 @@ def coupled_steady_solve(
         (ux, uy, p, T) velocity, pressure, temperature fields.
     """
     ux, uy, p = ns_solver.solve_steady(
-        sdf=sdf, inlet_velocity=inlet_velocity,
-        lid_velocity=lid_velocity, case=case,
+        sdf=sdf,
+        inlet_velocity=inlet_velocity,
+        lid_velocity=lid_velocity,
+        case=case,
     )
 
     T = heat_solver.solve(ux, uy, T_bc=T_bc)
@@ -454,8 +469,10 @@ def coupled_steady_solve(
         for _ in range(3):
             buoyancy_src = Ra * heat_solver.alpha * (T - T_ref)
             ux, uy, p = ns_solver.solve_steady(
-                sdf=sdf, inlet_velocity=inlet_velocity,
-                lid_velocity=lid_velocity, case=case,
+                sdf=sdf,
+                inlet_velocity=inlet_velocity,
+                lid_velocity=lid_velocity,
+                case=case,
                 buoyancy_src=buoyancy_src,
             )
             T = heat_solver.solve(ux, uy, T_bc=T_bc)

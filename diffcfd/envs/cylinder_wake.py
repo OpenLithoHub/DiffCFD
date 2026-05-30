@@ -102,9 +102,7 @@ class CylinderWakeEnv(DiffCFDEnv):
         )
 
         self.mesh = self._solver.mesh
-        self._sdf = cylinder_sdf(
-            self.mesh, self.cyl_cx, self.cyl_cy, self.cyl_r
-        )
+        self._sdf = cylinder_sdf(self.mesh, self.cyl_cx, self.cyl_cy, self.cyl_r)
 
         self._step_count = 0
         self._ux: Tensor | None = None
@@ -140,19 +138,23 @@ class CylinderWakeEnv(DiffCFDEnv):
             info,
         )
 
-    def step_differentiable(
-        self, action: Tensor
-    ) -> tuple[Tensor, Tensor, bool, dict]:
+    def step_differentiable(self, action: Tensor) -> tuple[Tensor, Tensor, bool, dict]:
         self._step_count += 1
 
-        rotation_rate = action[0] if isinstance(action, Tensor) and action.numel() > 0 else torch.tensor(0.0, device=self.device)
+        rotation_rate = (
+            action[0]
+            if isinstance(action, Tensor) and action.numel() > 0
+            else torch.tensor(0.0, device=self.device)
+        )
 
         u_inlet = torch.tensor(
             self.inlet_velocity, dtype=torch.float32, device=self.device
         ).requires_grad_(True)
 
-        # Compute body velocity field for rotating cylinder in Brinkman region
+        # Compute body velocity field for rotating cylinder in Brinkman region.
         # ω = 2·α·U∞/D; body velocity at (x,y) = ω × r = (-ω·ry, ω·rx)
+        # Note: .detach() is correct here — gradients through rotation → NS flow
+        # are handled by the implicit_diff backward path, not by unrolling.
         if rotation_rate.abs() > 1e-8:
             omega = rotation_rate * 2.0 * self.inlet_velocity / (2 * self.cyl_r)
             x, y = self.mesh.cell_centers()
@@ -165,8 +167,11 @@ class CylinderWakeEnv(DiffCFDEnv):
             u_body_y = None
 
         self._ux, self._uy, self._p = self._solver.solve_steady(
-            sdf=self._sdf, inlet_velocity=u_inlet, case="channel",
-            u_body_x=u_body_x, u_body_y=u_body_y,
+            sdf=self._sdf,
+            inlet_velocity=u_inlet,
+            case="channel",
+            u_body_x=u_body_x,
+            u_body_y=u_body_y,
         )
 
         obs = self._build_obs()
@@ -199,7 +204,7 @@ class CylinderWakeEnv(DiffCFDEnv):
 
         # Pressure drag: integrate p * dmask/dx over the domain
         chi = self._solver.mesh.sdf_to_mask(self._sdf, epsilon=1e-3)
-        dchi_dx = (chi[:, 1:] - chi[:, :-1]) / dx   # (ny, nx-1)
+        dchi_dx = (chi[:, 1:] - chi[:, :-1]) / dx  # (ny, nx-1)
 
         # Pressure at x-faces
         p_face_x = 0.5 * (self._p[:, :-1] + self._p[:, 1:])  # (ny, nx-1)
@@ -208,7 +213,7 @@ class CylinderWakeEnv(DiffCFDEnv):
         # Viscous drag: du_x/dy at y-faces times mask gradient
         # ux shape (ny, nx+1), du/dy at y-faces → (ny-1, nx+1)
         dux_dy = (self._ux[1:, :] - self._ux[:-1, :]) / dy  # (ny-1, nx+1)
-        dchi_dy = (chi[1:, :] - chi[:-1, :]) / dy            # (ny-1, nx)
+        dchi_dy = (chi[1:, :] - chi[:-1, :]) / dy  # (ny-1, nx)
         # Interpolate ux gradient to cell-center x-positions: (ny-1, nx)
         dux_dy_cc = 0.5 * (dux_dy[:, :-1] + dux_dy[:, 1:])
         viscous_drag = (1.0 / self.re) * (dux_dy_cc * dchi_dy * dx).sum()

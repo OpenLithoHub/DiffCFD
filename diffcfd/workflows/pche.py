@@ -11,6 +11,7 @@ The optimization chain:
 All within a single PyTorch autograd graph including the sCO₂ property
 surrogate for accurate transcritical thermal-hydraulic properties.
 """
+
 from __future__ import annotations
 
 import torch
@@ -42,7 +43,7 @@ def _pche_channel_sdf(
     for cy in channel_centers_y:
         dx = x - mesh.lx / 2.0  # channels centered in x
         dy = y - cy
-        dist = torch.sqrt(dx ** 2 + dy ** 2) - channel_radius
+        dist = torch.sqrt(dx**2 + dy**2) - channel_radius
         sdf = torch.minimum(sdf, dist)
 
     return sdf
@@ -93,7 +94,8 @@ def optimize_pche(
     solver = NavierStokes2D(
         reynolds_number=re,
         grid=grid,
-        lx=lx, ly=ly,
+        lx=lx,
+        ly=ly,
         device=device,
         backward="implicit_diff",
         max_iter=2000,
@@ -107,7 +109,8 @@ def optimize_pche(
     dy = ly / (n_channels + 1)
     y_init = torch.tensor(
         [dy * (i + 1) for i in range(n_channels)],
-        dtype=torch.float32, device=device,
+        dtype=torch.float32,
+        device=device,
     )
     y_pos = y_init.clone().detach().requires_grad_(True)
 
@@ -135,8 +138,12 @@ def optimize_pche(
         # Solve coupled NS + energy
         u_inlet = torch.tensor(inlet_velocity, dtype=torch.float32, device=device)
         ux, uy, p, T = coupled_steady_solve(
-            solver, heat_solver, T_bc=T_bc,
-            sdf=sdf, inlet_velocity=u_inlet, case="channel",
+            solver,
+            heat_solver,
+            T_bc=T_bc,
+            sdf=sdf,
+            inlet_velocity=u_inlet,
+            case="channel",
         )
 
         # Objectives

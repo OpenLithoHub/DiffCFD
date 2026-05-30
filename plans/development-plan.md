@@ -1,7 +1,8 @@
 # DiffCFD — Development Plan
 
-**Status:** Pre-implementation planning
+**Status:** v0.7 complete, pre-filing phase
 **Created:** 2026-05-23
+**Updated:** 2026-05-29
 **Patent strategy:** China first-filing, then PCT, then public push
 
 ---
@@ -179,19 +180,19 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
 (a) correctness of the forward NS solver and boundary conditions
 (b) correctness of the implicit differentiation
 
-- [ ] Implement forward SIMPLE solver (unrolled, full autograd through iterations)
-- [ ] Validate forward field: lid-driven cavity Re=100 vs Ghia et al. 1982
-- [ ] Confirm autograd works through unrolled iterations (gradcheck passes)
-- [ ] Measure memory at N=64²: confirm O(N·K) blowup as expected
-- [ ] **Anderson Acceleration (optional, add after baseline converges)**:
+- [x] Implement forward SIMPLE solver (unrolled, full autograd through iterations)
+- [x] Validate forward field: lid-driven cavity Re=100 vs Ghia et al. 1982
+- [x] Confirm autograd works through unrolled iterations (gradcheck passes)
+- [x] Measure memory at N=64²: confirm O(N·K) blowup as expected
+- [x] **Anderson Acceleration (optional, add after baseline converges)**:
   - Wrap the SIMPLE velocity/pressure update loop with Anderson mixing (history depth m=5)
   - Implementation: maintain the last m residual vectors; solve a small m×m least-squares at each iteration to extrapolate the next iterate
   - Expected gain: 50–80% reduction in iteration count to convergence (Anderson 1965; well-documented for fixed-point solvers)
   - This is a pure engineering optimization — not a patent claim, no novelty requirement
   - **Compatibility with C1**: Anderson acceleration changes how you reach the fixed point, not the fixed point itself. The implicit gradient in v0.1 is computed at the converged state using the unrelaxed physics residual R — Anderson does not affect this. The two are fully orthogonal.
   - Acceptance gate: measure wall-clock convergence time on lid-driven cavity Re=100 and Re=1000 with and without Anderson; report speedup factor
-- [ ] This unrolled version is the **cross-validation reference** for v0.1 implicit diff
-- [ ] Do NOT commit to main — keep on `dev/unrolled` branch, never push to public
+- [x] This unrolled version is the **cross-validation reference** for v0.1 implicit diff
+- [x] Do NOT commit to main — keep on `dev/unrolled` branch, never push to public
 
 ---
 
@@ -201,7 +202,7 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
 
 ### Core deliverables
 
-- [ ] `diffcfd/solvers/navier_stokes_2d.py` — differentiable 2D incompressible NS
+- [x] `diffcfd/solvers/navier_stokes_2d.py` — differentiable 2D incompressible NS
   - Finite volume on structured Cartesian grid (staggered MAC grid)
   - SIMPLE pressure-velocity coupling for steady state
   - **Implicit differentiation via fixed-point theorem** (C1) — **dual-function architecture (critical)**:
@@ -218,11 +219,11 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
     - Cross-validate: implicit diff gradients must agree with unrolled SIMPLE gradients (v0.05) to < 0.1%
   - Reference: Bai et al. 2019 (DEQ) + JFNK literature for matrix-free Krylov in CFD
 
-- [ ] `diffcfd/solvers/boundary.py`
+- [x] `diffcfd/solvers/boundary.py`
   - Inlet (Dirichlet velocity), outlet (zero-gradient pressure), no-slip wall, symmetry
   - All BC parameters differentiable: inlet velocity profile shape, wall temperature
 
-- [ ] `diffcfd/geometry/mesh.py`
+- [x] `diffcfd/geometry/mesh.py`
   - Structured Cartesian mesh with **SDF-based Brinkman penalization** instead of naive cut-cell
     - Naive cut-cell: step function at the fluid/solid boundary → gradient discontinuity → autograd fails or gives wrong gradients through geometry changes
     - Brinkman penalization: add a porosity term `(1-χ(φ)) · u / ε` to the momentum equation where `φ` is a signed distance field (SDF) and `χ` is a smooth Heaviside of the SDF — gradient is well-defined everywhere via the smooth SDF
@@ -230,7 +231,7 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
     - This is the standard approach in differentiable topology optimization (Lazarov & Sigmund 2016); applies directly to DiffCFD's immersed boundary
   - B-spline parameterized wall: smooth geometry → SDF → Heaviside mask → differentiable penalization
 
-- [ ] Validation suite (mandatory before CN filing):
+- [x] Validation suite (mandatory before CN filing):
   - **Grid convergence study** (Richardson extrapolation on lid-driven cavity): run at 32², 64², 128² to confirm mesh-independent result before reporting error vs Ghia — prevents "numbers were tuned" critique in patent examination
   - Lid-driven cavity Re=100 vs Ghia et al. 1982 (L2 error < 1%, grid-converged)
   - Lid-driven cavity Re=1000 vs Ghia et al. 1982 (L2 error < 2%, grid-converged)
@@ -242,9 +243,9 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
     3. Analytical: Poiseuille pressure drop ∂ΔP/∂U_inlet = 12μL/h² — **primary proof of gradient exactness for the full solver** (closed-form, must match to < 0.01%)
     - In the CN patent filing, describe the gradient proof honestly: "analytical comparison (Poiseuille, <0.01%) is the primary full-solver verification; complex-step provides sub-component verification." Do NOT claim three independent full-solver verification layers when layer 2 only covers sub-components — a false claim of "three-layer full-solver proof" is attackable in examination.
 
-- [ ] `diffcfd/export/vtk.py` — VTK export for ParaView visualization
+- [x] `diffcfd/export/vtk.py` — VTK export for ParaView visualization
 
-- [ ] **Pre-filing novelty search (blocking gate — must complete before CN filing):**
+- [ ] **Pre-filing novelty search (blocking gate — must complete before CN filing)** (last checked 2026-05-23):
   - Search PyPI for `pip search differentiable navier-stokes gymnasium` equivalents (PyPI search, GitHub search)
   - Check: HydroGym latest release notes — has `gymnasium.Env` subclass been added to any differentiable backend?
   - Check: FluidGym latest release — has SIMPLE steady-state been added? Has `gymnasium.Env` subclassing been added?
@@ -258,23 +259,23 @@ This phase is not a public release. It de-risks v0.1 by separating two problems:
 
 **Target:** 2 months after v0.1
 
-- [ ] `diffcfd/solvers/heat_transfer.py`
+- [x] `diffcfd/solvers/heat_transfer.py`
   - Conjugate heat transfer (energy equation coupled with NS)
   - Differentiable Nusselt number output
   - Steady-state implicit diff extended to coupled NS + energy system
 
-- [ ] `diffcfd/workflows/heat_exchanger.py`
+- [x] `diffcfd/workflows/heat_exchanger.py`
   - Fin geometry optimization: maximize Nu / pressure_drop (performance factor)
   - Fabrication constraint: minimum fin thickness (analog to MRC in OpenLithoHub)
   - Pareto front: Nu vs pressure drop for varying fin shapes
 
-- [ ] **sCO₂ property module** (feeds into v0.6 plan):
+- [x] **sCO₂ property module** (feeds into v0.6 plan):
   - `diffcfd/props/sco2.py` — differentiable sCO₂ property surrogate
   - Trained against NIST REFPROP data in transcritical region (0.9Tc–1.1Tc)
   - Physical consistency: monotone density, positive Cp (enforced by architecture)
   - This is C4 — the differentiable transcritical surrogate
 
-- [ ] Validation: PCHE (printed circuit heat exchanger) Nu correlation vs. Kim 2016
+- [x] Validation: PCHE (printed circuit heat exchanger) Nu correlation vs. Kim 2016
 
 ---
 
@@ -306,14 +307,14 @@ Standard Gymnasium is designed for transient MDP (sequential state transitions).
 
 Both modes share the same `gymnasium.Env` interface. Mode A/B selected via `env_config`.
 
-- [ ] `diffcfd/envs/base.py` — base `gymnasium.Env`
+- [x] `diffcfd/envs/base.py` — base `gymnasium.Env`
   - `step()` supports both Mode A (single-step) and Mode B (sequential)
   - `policy_gradient()` — analytical gradient via implicit diff (C2)
   - Compatible with Stable-Baselines3, CleanRL (standard gymnasium)
   - **Mode A SB3 config (required to avoid NaN)**: SB3 PPO with default settings (gamma=0.99, gae_lambda=0.95, n_steps=2048) will produce NaN or fail to converge for Mode A (episode length=1), because the value network bootstraps from a future that doesn't exist. Provide a `MODE_A_SB3_CONFIG` preset: `gamma=0`, `gae_lambda=0`, `n_steps=1` — this degenerates PPO to pure policy gradient on immediate reward (contextual bandit). Document this in the env's `__init__` docstring with a warning if the user instantiates Mode A without this config.
   - **APG reparameterization (required for stochastic policy with APG)**: `policy_gradient()` returns `dL/da` (gradient of physical loss w.r.t. action). If the policy is **deterministic** (`a = π(s; θ)` directly), the chain rule `dL/dθ = dL/da · da/dθ` applies directly — no reparameterization needed. If the policy is **stochastic** (`a ~ N(μ(s;θ), σ²)`), the sampling step cuts the autograd graph. Solution: use the **reparameterization trick** (`a = μ(s;θ) + σ·ε`, ε ~ N(0,1)) so `da/dθ` flows through the mean network. Both deterministic and reparameterized stochastic policies must be supported. The Rabault cylinder benchmark uses a deterministic policy; document which mode is used in the C2 embodiment to avoid patent ambiguity.
 
-- [ ] `diffcfd/envs/cylinder_wake.py` — Mode B benchmark
+- [x] `diffcfd/envs/cylinder_wake.py` — Mode B benchmark
   - Re=100, rotating cylinder action (Rabault et al. 2019 baseline)
   - Benchmark:
     - **Baseline**: SB3 PPO (model-free, does NOT use analytical gradients — standard gymnasium rollouts only)
@@ -322,7 +323,7 @@ Both modes share the same `gymnasium.Env` interface. Mode A/B selected via `env_
     - **Important**: SB3 PPO compatibility proves the environment is a standard gymnasium.Env; APG proves the analytical gradient is useful. These are separate claims that happen to use the same environment.
   - **This is the C2 patent embodiment** — document sample efficiency improvement with specific numbers
 
-- [ ] `diffcfd/envs/heat_exchanger.py` — Mode A benchmark
+- [x] `diffcfd/envs/heat_exchanger.py` — Mode A benchmark
   - Fin geometry optimization as single-step contextual bandit
   - Shows C1+C2 combination: implicit diff (C1) enables Mode A analytical gradient
 
@@ -345,7 +346,7 @@ The laminar NS solver (v0.1) is limited to low-to-moderate Re (< ~2000 in 2D). E
 - This gives differentiable gradients w.r.t. geometry with a fixed turbulence correction
 - Limitation: gradients do not account for how turbulence changes with geometry; acceptable for small design perturbations
 
-- [ ] `diffcfd/solvers/turbulence.py` — frozen eddy viscosity loader
+- [x] `diffcfd/solvers/turbulence.py` — frozen eddy viscosity loader
   - Input: eddy viscosity field `μ_t` (from file or precomputed OpenFOAM/scipy solver)
   - Output: effective viscosity tensor for use in SIMPLE momentum equation
   - Differentiable: yes (μ_t is a constant tensor; SIMPLE autograd flows through μ_eff as usual)
@@ -353,9 +354,9 @@ The laminar NS solver (v0.1) is limited to low-to-moderate Re (< ~2000 in 2D). E
 - [ ] (Optional / stretch) Spalart-Allmaras one-equation model — if SA equation is implemented inside the DiffCFD SIMPLE loop, μ_t becomes coupled and can be differentiated. Higher implementation cost but gives consistent gradients at moderate turbulence intensity.
   - Validation target: flat plate turbulent boundary layer (Spalart & Allmaras 1992 original test case)
 
-- [ ] Validation: duct flow at Re=10,000 — compare Nusselt number prediction vs Dittus-Boelter correlation (within 15%); this is the acceptance gate for frozen eddy viscosity being useful for heat exchanger design
+- [x] Validation: duct flow at Re=10,000 — compare Nusselt number prediction vs Dittus-Boelter correlation (within 15%); this is the acceptance gate for frozen eddy viscosity being useful for heat exchanger design
 
-- [ ] **Frozen μ_t perturbation validity bound (required for downstream v0.4/v0.6 use)**:
+- [x] **Frozen μ_t perturbation validity bound (required for downstream v0.4/v0.6 use)**:
   - Frozen eddy viscosity produces correct gradient direction ONLY for small geometry perturbations — for large changes, μ_t should be recomputed
   - Determine the perturbation bound: run paired tests where (a) gradient is computed with frozen μ_t, (b) gradient is computed by re-solving RANS after each geometry step; compare gradient direction (cosine similarity). Report the geometry perturbation magnitude at which cosine similarity drops below 0.9.
   - Document this bound explicitly in v0.35 API and in v0.4/v0.6 optimization workflows: "frozen μ_t valid for perturbations < X% of characteristic length"
@@ -365,19 +366,19 @@ The laminar NS solver (v0.1) is limited to low-to-moderate Re (< ~2000 in 2D). E
 
 ## v0.4 — Aerodynamic Shape Optimization
 
-- [ ] `diffcfd/geometry/airfoil.py` — NACA + B-spline parameterization
-- [ ] `diffcfd/workflows/aero.py` — drag/lift optimization workflow
-- [ ] Validation: NACA0012 drag vs OpenFOAM (Re=1000, expect <3% discrepancy)
+- [x] `diffcfd/geometry/airfoil.py` — NACA + B-spline parameterization
+- [x] `diffcfd/workflows/aero.py` — drag/lift optimization workflow
+- [x] Validation: NACA0012 drag vs OpenFOAM (Re=1000, expect <3% discrepancy)
 - [ ] **2026 addition**: Multi-objective Pareto optimization (drag vs lift vs structural weight)
 
 ---
 
 ## v0.5 — Neural Operator Surrogates
 
-- [ ] Use DiffCFD as ground-truth to generate FNO training data
-- [ ] Train FNO surrogate on geometry → flow field mapping
-- [ ] Surrogate-in-the-loop: fast FNO prediction → periodic DiffCFD correction
-- [ ] Benchmark: surrogate speed vs accuracy trade-off
+- [x] Use DiffCFD as ground-truth to generate FNO training data
+- [x] Train FNO surrogate on geometry → flow field mapping
+- [x] Surrogate-in-the-loop: fast FNO prediction → periodic DiffCFD correction
+- [x] Benchmark: surrogate speed vs accuracy trade-off
 - [ ] **2026 addition**: Active learning loop — DiffCFD selects informative geometries to query, reducing training data needed by ~10x
 
 ---
@@ -386,11 +387,11 @@ The laminar NS solver (v0.1) is limited to low-to-moderate Re (< ~2000 in 2D). E
 
 Full integration with [sCO₂-TMSR-Toolkit](https://github.com/OpenLithoHub/sCO2-TMSR-Toolkit):
 
-- [ ] PCHE channel shape optimization (maximize compactness factor)
+- [x] PCHE channel shape optimization (maximize compactness factor)
   - Use `diffcfd/props/sco2.py` (from v0.2) for accurate transcritical properties
   - Geometry: B-spline parameterized semicircular channels
   - Objective: maximize heat transfer area density subject to pressure drop constraint
-- [ ] Cycle-level coupled optimization:
+- [x] Cycle-level coupled optimization:
   - DiffCFD provides CFD-level PCHE conductance as differentiable function of geometry
   - sCO₂-TMSR-Toolkit provides cycle-level efficiency as function of PCHE conductance
   - Chain rule connects geometry → CFD → cycle efficiency end-to-end
@@ -411,6 +412,18 @@ Full integration with [sCO₂-TMSR-Toolkit](https://github.com/OpenLithoHub/sCO2
 - Design this abstract interface at v0.2 (when the first property call appears), NOT at v0.6 — retrofitting an interface into an existing codebase is expensive
 
 ---
+
+## v0.7 — Rust-Accelerated Forward Kernels (Completed 2026-05-29)
+
+Forward SIMPLE kernels (momentum assembly, pressure system, SDF computation) migrated to Rust via PyO3/maturin. Backward pass (implicit diff) remains pure PyTorch for vjp compatibility.
+
+- [x] `src/momentum.rs` — Sparse CSR momentum system assembly
+- [x] `src/pressure.rs` — SIMPLE pressure correction system assembly
+- [x] `src/sdf.rs` — B-spline SDF with rayon parallelism
+- [x] `src/simple.rs` — Full SIMPLE forward loop with faer sparse solve
+- [x] `src/lib.rs` — PyO3 module bridge
+- [x] CI integration: maturin develop + Rust toolchain in GitHub Actions
+- [x] Validation: 70/70 unit tests pass, all validation tests pass
 
 ## Patent Claims (Draft — Pre-filing, Confidential)
 

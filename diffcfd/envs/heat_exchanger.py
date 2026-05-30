@@ -115,9 +115,7 @@ class HeatExchangerEnv(DiffCFDEnv):
             info,
         )
 
-    def step_differentiable(
-        self, action: Tensor
-    ) -> tuple[Tensor, Tensor, bool, dict]:
+    def step_differentiable(self, action: Tensor) -> tuple[Tensor, Tensor, bool, dict]:
         self._step_count += 1
 
         # Build geometry from action (differentiable)

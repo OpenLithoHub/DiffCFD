@@ -4,6 +4,7 @@ Run with: python3 scripts/collect_paper_results.py
 
 Outputs saved to results/ directory.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ os.environ["MKL_NUM_THREADS"] = "6"
 os.environ["OPENBLAS_NUM_THREADS"] = "6"
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -39,6 +41,7 @@ def save_json(data, name):
 # 1. Lid-driven cavity validation at multiple resolutions
 # ======================================================================
 
+
 def run_lid_cavity_validation():
     """Run lid-driven cavity at Re=100 and Re=1000 at multiple grid sizes."""
     print("\n" + "=" * 60)
@@ -54,14 +57,19 @@ def run_lid_cavity_validation():
     re100_configs = [
         (32, 2000, 0.7, 0.3, 0),
         (64, 3000, 0.7, 0.3, 0),
-        (128, 5000, 0.5, 0.2, 5),   # Anderson depth=5 for faster convergence
+        (128, 5000, 0.5, 0.2, 5),  # Anderson depth=5 for faster convergence
     ]
     for grid, max_iter, au, ap, anderson in re100_configs:
         print(f"  Re=100, grid={grid}x{grid}...", end=" ", flush=True)
         t0 = time.time()
         solver = NavierStokes2D(
-            reynolds_number=100, grid=(grid, grid), device="cpu",
-            max_iter=max_iter, tol=1e-5, alpha_u=au, alpha_p=ap,
+            reynolds_number=100,
+            grid=(grid, grid),
+            device="cpu",
+            max_iter=max_iter,
+            tol=1e-5,
+            alpha_u=au,
+            alpha_p=ap,
             anderson_depth=anderson,
         )
         ux, uy, p = solver.solve_steady(
@@ -71,7 +79,9 @@ def run_lid_cavity_validation():
 
         # Compare with Ghia data
         ghia_dir = Path(__file__).parent.parent / "tests" / "validation" / "ghia1982"
-        y_ref, u_ref = np.loadtxt(ghia_dir / "re100_u.csv", delimiter=",", skiprows=1, unpack=True)
+        y_ref, u_ref = np.loadtxt(
+            ghia_dir / "re100_u.csv", delimiter=",", skiprows=1, unpack=True
+        )
         y_ux = np.linspace(0.0, 1.0, grid)
         ux_center = ux[:, grid // 2].detach().numpy()
         u_at_ghia = np.interp(y_ref, y_ux, ux_center)
@@ -82,13 +92,16 @@ def run_lid_cavity_validation():
             "l2_error": l2_err,
             "converged": True,
         }
-        print(f"L2={l2_err*100:.3f}%, t={elapsed:.1f}s")
+        print(f"L2={l2_err * 100:.3f}%, t={elapsed:.1f}s")
 
         # Save velocity profile
         np.savez(
             RESULTS_DIR / f"cavity_re100_{grid}.npz",
-            y=y_ux, ux=ux_center, ux_field=ux.detach().numpy(),
-            uy_field=uy.detach().numpy(), p_field=p.detach().numpy(),
+            y=y_ux,
+            ux=ux_center,
+            ux_field=ux.detach().numpy(),
+            uy_field=uy.detach().numpy(),
+            p_field=p.detach().numpy(),
         )
 
     results["re100"] = re100_data
@@ -103,8 +116,13 @@ def run_lid_cavity_validation():
         print(f"  Re=1000, grid={grid}x{grid}...", end=" ", flush=True)
         t0 = time.time()
         solver = NavierStokes2D(
-            reynolds_number=1000, grid=(grid, grid), device="cpu",
-            max_iter=max_iter, tol=1e-5, alpha_u=au, alpha_p=ap,
+            reynolds_number=1000,
+            grid=(grid, grid),
+            device="cpu",
+            max_iter=max_iter,
+            tol=1e-5,
+            alpha_u=au,
+            alpha_p=ap,
             anderson_depth=anderson,
         )
         ux, uy, p = solver.solve_steady(
@@ -112,7 +130,9 @@ def run_lid_cavity_validation():
         )
         elapsed = time.time() - t0
 
-        y_ref, u_ref = np.loadtxt(ghia_dir / "re1000_u.csv", delimiter=",", skiprows=1, unpack=True)
+        y_ref, u_ref = np.loadtxt(
+            ghia_dir / "re1000_u.csv", delimiter=",", skiprows=1, unpack=True
+        )
         y_ux = np.linspace(0.0, 1.0, grid)
         ux_center = ux[:, grid // 2].detach().numpy()
         u_at_ghia = np.interp(y_ref, y_ux, ux_center)
@@ -123,12 +143,15 @@ def run_lid_cavity_validation():
             "l2_error": l2_err,
             "converged": True,
         }
-        print(f"L2={l2_err*100:.3f}%, t={elapsed:.1f}s")
+        print(f"L2={l2_err * 100:.3f}%, t={elapsed:.1f}s")
 
         np.savez(
             RESULTS_DIR / f"cavity_re1000_{grid}.npz",
-            y=y_ux, ux=ux_center, ux_field=ux.detach().numpy(),
-            uy_field=uy.detach().numpy(), p_field=p.detach().numpy(),
+            y=y_ux,
+            ux=ux_center,
+            ux_field=ux.detach().numpy(),
+            uy_field=uy.detach().numpy(),
+            p_field=p.detach().numpy(),
         )
 
     results["re1000"] = re1000_data
@@ -139,6 +162,7 @@ def run_lid_cavity_validation():
 # ======================================================================
 # 2. Poiseuille flow validation + gradient verification
 # ======================================================================
+
 
 def run_poiseuille_validation():
     """Poiseuille forward validation and implicit differentiation check."""
@@ -155,8 +179,12 @@ def run_poiseuille_validation():
         nx, ny = 32 * nx_mult, 16 * nx_mult
         print(f"  Grid ({nx}, {ny})...", end=" ", flush=True)
         solver = NavierStokes2D(
-            reynolds_number=1.0, grid=(nx, ny),
-            lx=4.0, ly=1.0, max_iter=3000, tol=1e-8,
+            reynolds_number=1.0,
+            grid=(nx, ny),
+            lx=4.0,
+            ly=1.0,
+            max_iter=3000,
+            tol=1e-8,
         )
         ux, uy, p = solver.solve_steady(inlet_velocity=1.0, case="channel")
 
@@ -183,7 +211,7 @@ def run_poiseuille_validation():
             "dp_analytical": dp_analytical,
             "dp_error": dp_err,
         }
-        print(f"L2={l2_err*100:.4f}%, dp_err={dp_err*100:.4f}%")
+        print(f"L2={l2_err * 100:.4f}%, dp_err={dp_err * 100:.4f}%")
 
     # Gradient verification
     print("  Implicit differentiation gradient check...", end=" ", flush=True)
@@ -191,16 +219,24 @@ def run_poiseuille_validation():
     solver_fd = NavierStokes2D(
         reynolds_number=1.0, grid=(32, 16), lx=4.0, ly=1.0, tol=1e-8
     )
-    ux_p, uy_p, p_p = solver_fd._run_simple(None, inlet_velocity=1.0 + eps, case="channel")
-    ux_m, uy_m, p_m = solver_fd._run_simple(None, inlet_velocity=1.0 - eps, case="channel")
+    ux_p, uy_p, p_p = solver_fd._run_simple(
+        None, inlet_velocity=1.0 + eps, case="channel"
+    )
+    ux_m, uy_m, p_m = solver_fd._run_simple(
+        None, inlet_velocity=1.0 - eps, case="channel"
+    )
     dp_p = solver_fd.pressure_drop(ux_p, uy_p, p_p)
     dp_m = solver_fd.pressure_drop(ux_m, uy_m, p_m)
     fd_grad = float((dp_p - dp_m) / (2 * eps))
 
     u_inlet = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
     solver_id = NavierStokes2D(
-        reynolds_number=1.0, grid=(32, 16), lx=4.0, ly=1.0,
-        backward="implicit_diff", tol=1e-8
+        reynolds_number=1.0,
+        grid=(32, 16),
+        lx=4.0,
+        ly=1.0,
+        backward="implicit_diff",
+        tol=1e-8,
     )
     ux, uy, pf = solver_id.solve_steady(inlet_velocity=u_inlet, case="channel")
     dp = solver_id.pressure_drop(ux, uy, pf)
@@ -224,15 +260,14 @@ def run_poiseuille_validation():
 # 3. sCO2 surrogate training with realistic data
 # ======================================================================
 
+
 def run_sco2_training():
     """Train sCO2 surrogate with physically realistic training data."""
     print("\n" + "=" * 60)
     print("3. sCO₂ Surrogate Training")
     print("=" * 60)
 
-    from diffcfd.props.sco2 import (
-        TC, PC, generate_training_data, train_sco2_surrogate
-    )
+    from diffcfd.props.sco2 import TC, PC, generate_training_data, train_sco2_surrogate
 
     # Generate high-quality training data covering the transcritical region
     n_samples = 8000
@@ -281,8 +316,10 @@ def run_sco2_training():
     print(f"  μ  rel_L2 = {results['viscosity_rel_l2']:.4f}")
     print(f"  k  rel_L2 = {results['conductivity_rel_l2']:.4f}")
     print(f"  cp rel_L2 = {results['specific_heat_rel_l2']:.4f}")
-    print(f"  All positive: ρ={results['density_positivity']}, μ={results['viscosity_positivity']}, "
-          f"k={results['conductivity_positivity']}, cp={results['specific_heat_positivity']}")
+    print(
+        f"  All positive: ρ={results['density_positivity']}, μ={results['viscosity_positivity']}, "
+        f"k={results['conductivity_positivity']}, cp={results['specific_heat_positivity']}"
+    )
 
     # Test differentiability
     T_test = torch.tensor([305.0], requires_grad=True)
@@ -305,7 +342,9 @@ def run_sco2_training():
 
     np.savez(
         RESULTS_DIR / "sco2_property_map.npz",
-        T=T_grid.numpy(), p=p_grid.numpy(), rho=rho_map,
+        T=T_grid.numpy(),
+        p=p_grid.numpy(),
+        rho=rho_map,
     )
 
     save_json(results, "sco2_training.json")
@@ -315,6 +354,7 @@ def run_sco2_training():
 # ======================================================================
 # 4. Full benchmark suite
 # ======================================================================
+
 
 def run_benchmark_suite():
     """Run the complete benchmark suite."""
@@ -328,14 +368,16 @@ def run_benchmark_suite():
 
     bench_data = []
     for r in results:
-        bench_data.append({
-            "name": r.name,
-            "status": r.status,
-            "time_s": r.time_s,
-            "value": r.value,
-            "target": r.target,
-            "error": r.error,
-        })
+        bench_data.append(
+            {
+                "name": r.name,
+                "status": r.status,
+                "time_s": r.time_s,
+                "value": r.value,
+                "target": r.target,
+                "error": r.error,
+            }
+        )
 
     save_json(bench_data, "benchmark_results.json")
 
@@ -350,6 +392,7 @@ def run_benchmark_suite():
 # ======================================================================
 # 5. Gradient accuracy across problem sizes
 # ======================================================================
+
 
 def run_gradient_convergence():
     """Test gradient accuracy across different grid sizes."""
@@ -372,15 +415,29 @@ def run_gradient_convergence():
         solver_fd = NavierStokes2D(
             reynolds_number=1.0, grid=(nx, ny), lx=4.0, ly=1.0, tol=1e-8
         )
-        ux_p, uy_p, p_p = solver_fd._run_simple(None, inlet_velocity=1.0 + eps, case="channel")
-        ux_m, uy_m, p_m = solver_fd._run_simple(None, inlet_velocity=1.0 - eps, case="channel")
-        fd_grad = float((solver_fd.pressure_drop(ux_p, uy_p, p_p) - solver_fd.pressure_drop(ux_m, uy_m, p_m)) / (2 * eps))
+        ux_p, uy_p, p_p = solver_fd._run_simple(
+            None, inlet_velocity=1.0 + eps, case="channel"
+        )
+        ux_m, uy_m, p_m = solver_fd._run_simple(
+            None, inlet_velocity=1.0 - eps, case="channel"
+        )
+        fd_grad = float(
+            (
+                solver_fd.pressure_drop(ux_p, uy_p, p_p)
+                - solver_fd.pressure_drop(ux_m, uy_m, p_m)
+            )
+            / (2 * eps)
+        )
 
         # Implicit diff
         u_in = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
         solver_ad = NavierStokes2D(
-            reynolds_number=1.0, grid=(nx, ny), lx=4.0, ly=1.0,
-            backward="implicit_diff", tol=1e-8
+            reynolds_number=1.0,
+            grid=(nx, ny),
+            lx=4.0,
+            ly=1.0,
+            backward="implicit_diff",
+            tol=1e-8,
         )
         ux, uy, pf = solver_ad.solve_steady(inlet_velocity=u_in, case="channel")
         dp = solver_ad.pressure_drop(ux, uy, pf)
@@ -409,19 +466,22 @@ def run_gradient_convergence():
 # 6. Generate publication figures
 # ======================================================================
 
+
 def generate_figures(cavity_results, poiseuille_results, sco2_results):
     """Generate all publication-quality figures."""
     print("\n" + "=" * 60)
     print("6. Generating Publication Figures")
     print("=" * 60)
 
-    plt.rcParams.update({
-        "font.size": 11,
-        "font.family": "serif",
-        "axes.labelsize": 12,
-        "figure.figsize": (6, 4.5),
-        "figure.dpi": 150,
-    })
+    plt.rcParams.update(
+        {
+            "font.size": 11,
+            "font.family": "serif",
+            "axes.labelsize": 12,
+            "figure.figsize": (6, 4.5),
+            "figure.dpi": 150,
+        }
+    )
 
     # Figure 1: Cavity velocity profiles
     _fig_cavity()
@@ -443,7 +503,9 @@ def _fig_cavity():
     for ax, re, color in zip(axes, [100, 1000], ["C0", "C1"]):
         # Ghia reference
         fname = f"re{re}_u.csv"
-        y_ref, u_ref = np.loadtxt(ghia_dir / fname, delimiter=",", skiprows=1, unpack=True)
+        y_ref, u_ref = np.loadtxt(
+            ghia_dir / fname, delimiter=",", skiprows=1, unpack=True
+        )
         ax.plot(u_ref, y_ref, "ko", markersize=5, label="Ghia et al. 1982")
 
         # DiffCFD results at different resolutions
@@ -452,7 +514,14 @@ def _fig_cavity():
             path = RESULTS_DIR / f"cavity_re{re}_{grid}.npz"
             if path.exists():
                 d = np.load(path)
-                ax.plot(d["ux"], d["y"], "-", color=color, alpha=0.7, label=f"DiffCFD {grid}²")
+                ax.plot(
+                    d["ux"],
+                    d["y"],
+                    "-",
+                    color=color,
+                    alpha=0.7,
+                    label=f"DiffCFD {grid}²",
+                )
 
         ax.set_xlabel("u / U_lid")
         ax.set_ylabel("y / L")
@@ -479,7 +548,7 @@ def _fig_grid_convergence(cavity_results, poiseuille_results):
     ax.loglog([g**2 for g in grids], errors, "o-", label="L2 error")
     # Reference 2nd-order line
     ref_x = [g**2 for g in grids]
-    ref_y = [errors[0] * (ref_x[0] / x)**1 for x in ref_x]
+    ref_y = [errors[0] * (ref_x[0] / x) ** 1 for x in ref_x]
     ax.loglog(ref_x, ref_y, "--", alpha=0.4, label="1st order ref")
     ax.set_xlabel("Grid points (N)")
     ax.set_ylabel("L2 error")
@@ -491,9 +560,9 @@ def _fig_grid_convergence(cavity_results, poiseuille_results):
     ax = axes[1]
     p_grids = ["32x16", "64x32", "128x64"]
     p_errors = [poiseuille_results[g]["forward_l2"] for g in p_grids]
-    p_n = [32*16, 64*32, 128*64]
+    p_n = [32 * 16, 64 * 32, 128 * 64]
     ax.loglog(p_n, p_errors, "s-", label="L2 error")
-    ref_y2 = [p_errors[0] * (p_n[0] / x)**2 for x in p_n]
+    ref_y2 = [p_errors[0] * (p_n[0] / x) ** 2 for x in p_n]
     ax.loglog(p_n, ref_y2, "--", alpha=0.4, label="2nd order ref")
     ax.set_xlabel("Grid points (N)")
     ax.set_ylabel("L2 error")
@@ -522,12 +591,11 @@ def _fig_sco2():
     Tc = 304.13
     Pc = 7.377e6
 
-    im = ax.pcolormesh(
-        d["p"] / 1e6, d["T"], d["rho"],
-        cmap="viridis", shading="auto"
-    )
+    im = ax.pcolormesh(d["p"] / 1e6, d["T"], d["rho"], cmap="viridis", shading="auto")
     ax.axhline(Tc, color="r", linestyle="--", alpha=0.7, label=f"Tc = {Tc} K")
-    ax.axvline(Pc / 1e6, color="r", linestyle=":", alpha=0.7, label=f"Pc = {Pc/1e6:.3f} MPa")
+    ax.axvline(
+        Pc / 1e6, color="r", linestyle=":", alpha=0.7, label=f"Pc = {Pc / 1e6:.3f} MPa"
+    )
     ax.set_xlabel("Pressure [MPa]")
     ax.set_ylabel("Temperature [K]")
     ax.set_title("sCO₂ Density [kg/m³] — Neural Surrogate")
@@ -581,6 +649,7 @@ def _fig_gradient_bars():
 # Main
 # ======================================================================
 
+
 def main():
     print("=" * 60)
     print("DiffCFD v0.6 — Paper Results Collection")
@@ -611,7 +680,7 @@ def main():
     # Summary
     total_time = time.time() - t_start
     print("\n" + "=" * 60)
-    print(f"COMPLETE — Total time: {total_time:.0f}s ({total_time/60:.1f} min)")
+    print(f"COMPLETE — Total time: {total_time:.0f}s ({total_time / 60:.1f} min)")
     print(f"Results saved to {RESULTS_DIR}/")
     print("=" * 60)
 

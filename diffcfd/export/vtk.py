@@ -68,7 +68,7 @@ def save_vtk(
 
     ux_cc, uy_cc = _cell_center_velocity(ux, uy)
     p_np = p.detach().cpu().numpy().astype("float64")
-    vel_mag = np.sqrt(ux_cc ** 2 + uy_cc ** 2)
+    vel_mag = np.sqrt(ux_cc**2 + uy_cc**2)
     vorticity = _cell_center_vorticity(ux_cc, uy_cc, dx, dy)
 
     with open(path, "w") as f:
@@ -98,8 +98,11 @@ def save_vtk(
             for i in range(nx):
                 f.write(f"{ux_cc[j, i]:.10e} {uy_cc[j, i]:.10e} 0.0\n")
 
-        for name, data in [("pressure", p_np), ("velocity_magnitude", vel_mag),
-                           ("vorticity", vorticity)]:
+        for name, data in [
+            ("pressure", p_np),
+            ("velocity_magnitude", vel_mag),
+            ("vorticity", vorticity),
+        ]:
             f.write(f"SCALARS {name} float64 1\n")
             f.write("LOOKUP_TABLE default\n")
             for j in range(ny):

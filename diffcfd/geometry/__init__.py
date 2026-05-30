@@ -6,6 +6,11 @@ from diffcfd.geometry.airfoil import NACA4Digit, BSplineAirfoil
 from diffcfd.geometry.filters import HelmholtzFilter
 
 __all__ = [
-    "CartesianMesh", "cylinder_sdf", "rectangle_sdf", "naca0012_sdf",
-    "NACA4Digit", "BSplineAirfoil", "HelmholtzFilter",
+    "CartesianMesh",
+    "cylinder_sdf",
+    "rectangle_sdf",
+    "naca0012_sdf",
+    "NACA4Digit",
+    "BSplineAirfoil",
+    "HelmholtzFilter",
 ]

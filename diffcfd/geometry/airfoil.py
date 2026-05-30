@@ -60,15 +60,11 @@ class NACA4Digit:
         """
         if camber < 1e-8:
             # Symmetric airfoil (NACA 00xx)
-            return naca0012_sdf(
-                mesh, self.chord, self.le_x, self.cy, self.angle
-            )
+            return naca0012_sdf(mesh, self.chord, self.le_x, self.cy, self.angle)
 
         # Cambered airfoil: compute camber line and add thickness
         x, y = mesh.cell_centers()
-        theta = torch.tensor(
-            self.angle * 3.14159265 / 180.0, device=mesh.device
-        )
+        theta = torch.tensor(self.angle * 3.14159265 / 180.0, device=mesh.device)
 
         # Rotate coordinates
         dx = x - (self.le_x + self.chord / 2)
@@ -85,18 +81,23 @@ class NACA4Digit:
         p = camber_pos
         yc = torch.where(
             xn < p,
-            m / p ** 2 * (2 * p * xn - xn ** 2),
-            m / (1 - p) ** 2 * ((1 - 2 * p) + 2 * p * xn - xn ** 2),
+            m / p**2 * (2 * p * xn - xn**2),
+            m / (1 - p) ** 2 * ((1 - 2 * p) + 2 * p * xn - xn**2),
         )
 
         # Thickness distribution (same as NACA 0012 scaled)
         t = thickness
-        yt = t / 0.2 * self.chord * (
-            0.2969 * torch.sqrt(xn + 1e-10)
-            - 0.1260 * xn
-            - 0.3516 * xn ** 2
-            + 0.2843 * xn ** 3
-            - 0.1015 * xn ** 4
+        yt = (
+            t
+            / 0.2
+            * self.chord
+            * (
+                0.2969 * torch.sqrt(xn + 1e-10)
+                - 0.1260 * xn
+                - 0.3516 * xn**2
+                + 0.2843 * xn**3
+                - 0.1015 * xn**4
+            )
         )
 
         # SDF: distance from (x_rot, y_rot) to nearest surface point
@@ -107,7 +108,7 @@ class NACA4Digit:
             y_dist,
             torch.sqrt(
                 torch.minimum(
-                    x_rot ** 2 + (y_rot - yc) ** 2,
+                    x_rot**2 + (y_rot - yc) ** 2,
                     (x_rot - self.chord) ** 2 + (y_rot - yc) ** 2,
                 )
             ),
@@ -151,12 +152,16 @@ class BSplineAirfoil:
         t = torch.linspace(0, 1, n + 1)[:-1]
 
         # NACA 0012 thickness distribution for upper surface
-        yt = 0.12 / 0.2 * (
-            0.2969 * torch.sqrt(t + 1e-10)
-            - 0.1260 * t
-            - 0.3516 * t ** 2
-            + 0.2843 * t ** 3
-            - 0.1015 * t ** 4
+        yt = (
+            0.12
+            / 0.2
+            * (
+                0.2969 * torch.sqrt(t + 1e-10)
+                - 0.1260 * t
+                - 0.3516 * t**2
+                + 0.2843 * t**3
+                - 0.1015 * t**4
+            )
         )
 
         # Upper surface: trailing edge to leading edge
@@ -167,10 +172,13 @@ class BSplineAirfoil:
         x_lower = self.le_x + self.chord * t
         y_lower = self.cy - yt * self.chord
 
-        cp = torch.stack([
-            torch.cat([x_upper, x_lower]),
-            torch.cat([y_upper, y_lower]),
-        ], dim=1)
+        cp = torch.stack(
+            [
+                torch.cat([x_upper, x_lower]),
+                torch.cat([y_upper, y_lower]),
+            ],
+            dim=1,
+        )
 
         return cp
 
@@ -199,7 +207,8 @@ class BSplineAirfoil:
             ap = pts - a
             t = torch.clamp(
                 torch.sum(ap * ab, dim=1) / (torch.sum(ab * ab) + 1e-10),
-                0.0, 1.0,
+                0.0,
+                1.0,
             )
             closest = a + t.unsqueeze(1) * ab
             dist_sq = torch.sum((pts - closest) ** 2, dim=1)

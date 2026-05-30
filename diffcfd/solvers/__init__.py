@@ -5,4 +5,9 @@ from diffcfd.solvers.heat_transfer import HeatTransfer2D
 from diffcfd.solvers.turbulence import FrozenEddyViscosity
 from diffcfd.solvers.implicit_diff import fixed_point_gradient
 
-__all__ = ["NavierStokes2D", "HeatTransfer2D", "FrozenEddyViscosity", "fixed_point_gradient"]
+__all__ = [
+    "NavierStokes2D",
+    "HeatTransfer2D",
+    "FrozenEddyViscosity",
+    "fixed_point_gradient",
+]

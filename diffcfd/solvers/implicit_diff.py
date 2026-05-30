@@ -53,7 +53,9 @@ def fixed_point_gradient(
         _, vjp_fn = torch.func.vjp(lambda u: residual_fn(u, theta_d), u_star_d)
         return vjp_fn(v)[0]
 
-    lambda_, _ = gmres_matfree(matvec_Jt, loss_grad.detach(), tol=tol, max_iter=max_iter)
+    lambda_, _ = gmres_matfree(
+        matvec_Jt, loss_grad.detach(), tol=tol, max_iter=max_iter
+    )
 
     # dL/dθ = -(∂R/∂θ)ᵀ λ
     _, vjp_fn_theta = torch.func.vjp(lambda th: residual_fn(u_star_d, th), theta_d)

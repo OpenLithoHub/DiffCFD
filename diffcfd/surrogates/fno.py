@@ -15,6 +15,7 @@ Each Fourier layer:
 Reference: Li et al., "Fourier Neural Operator for Parametric Partial
 Differential Equations", ICLR 2021.
 """
+
 from __future__ import annotations
 
 import torch
@@ -32,7 +33,8 @@ class _SpectralConv2d(nn.Module):
         self.modes = modes
         scale = 1.0 / (in_channels * out_channels)
         self.weights = nn.Parameter(
-            scale * torch.rand(in_channels, out_channels, modes, modes, dtype=torch.cfloat)
+            scale
+            * torch.rand(in_channels, out_channels, modes, modes, dtype=torch.cfloat)
         )
 
     def forward(self, x: Tensor) -> Tensor:
@@ -43,7 +45,9 @@ class _SpectralConv2d(nn.Module):
         x_ft = torch.fft.rfft2(x)
 
         # Multiply learnable spectral weights on low-frequency modes
-        out_ft = torch.zeros(B, self.out_ch, H, W // 2 + 1, dtype=torch.cfloat, device=x.device)
+        out_ft = torch.zeros(
+            B, self.out_ch, H, W // 2 + 1, dtype=torch.cfloat, device=x.device
+        )
         m_h = min(m, H)
         m_w = min(m, W // 2 + 1)
         out_ft[:, :, :m_h, :m_w] = torch.einsum(
@@ -116,7 +120,7 @@ class FNO2D(nn.Module):
         # Lift input channels
         B, C, H, W = x.shape
         x = x.permute(0, 2, 3, 1)  # (B, H, W, C)
-        x = self.lift(x)            # (B, H, W, width)
+        x = self.lift(x)  # (B, H, W, width)
         x = x.permute(0, 3, 1, 2)  # (B, width, H, W)
 
         # FNO blocks
@@ -125,7 +129,7 @@ class FNO2D(nn.Module):
 
         # Project to output channels
         x = x.permute(0, 2, 3, 1)  # (B, H, W, width)
-        x = self.project(x)         # (B, H, W, out_channels)
+        x = self.project(x)  # (B, H, W, out_channels)
         x = x.permute(0, 3, 1, 2)  # (B, out_channels, H, W)
 
         return x
@@ -154,6 +158,18 @@ def generate_fno_training_data(
     inputs = []
     outputs = []
 
+    # Reuse one solver instance across all samples
+    solver = NavierStokes2D(
+        reynolds_number=re,
+        grid=(nx, ny),
+        lx=lx,
+        ly=ly,
+        device=device,
+        backward="unrolled",
+        max_iter=1000,
+        tol=1e-4,
+    )
+
     for i in range(n_samples):
         # Vary inlet velocity
         u_inlet = 0.5 + 1.5 * (i / max(n_samples - 1, 1))
@@ -163,15 +179,6 @@ def generate_fno_training_data(
         cy = ly / 2.0
         radius = 0.05
 
-        solver = NavierStokes2D(
-            reynolds_number=re,
-            grid=(nx, ny),
-            lx=lx, ly=ly,
-            device=device,
-            backward="unrolled",
-            max_iter=1000,
-            tol=1e-4,
-        )
         sdf = cylinder_sdf(solver.mesh, cx, cy, radius)
         chi = solver.mesh.sdf_to_mask(sdf, epsilon=1e-3)
 
@@ -219,7 +226,11 @@ def train_fno(
         Trained FNO2D model.
     """
     data = generate_fno_training_data(
-        n_samples=n_train, nx=nx, ny=ny, device=device, verbose=verbose,
+        n_samples=n_train,
+        nx=nx,
+        ny=ny,
+        device=device,
+        verbose=verbose,
     )
     x_train = data["input"].to(device)
     y_train = data["output"].to(device)
@@ -228,17 +239,32 @@ def train_fno(
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
+    batch_size = min(32, n_train)
+    n_samples = x_train.shape[0]
+
     for epoch in range(epochs):
         model.train()
-        opt.zero_grad()
-        pred = model(x_train)
-        loss = ((pred - y_train) ** 2).mean()
-        loss.backward()
-        opt.step()
+        epoch_loss = 0.0
+        perm = torch.randperm(n_samples, device=device)
+        for start in range(0, n_samples, batch_size):
+            idx = perm[start : start + batch_size]
+            xb, yb = x_train[idx], y_train[idx]
+            opt.zero_grad()
+            pred = model(xb)
+            loss = ((pred - yb) ** 2).mean()
+            loss.backward()
+            opt.step()
+            epoch_loss += loss.item()
+
         scheduler.step()
 
         if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
-            rel_err = ((pred - y_train) ** 2).sum() / (y_train ** 2).sum()
-            print(f"Epoch {epoch:4d}: loss={loss.item():.4e}, rel_err={rel_err.item():.4f}")
+            model.eval()
+            with torch.no_grad():
+                pred_all = model(x_train)
+                rel_err = ((pred_all - y_train) ** 2).sum() / (y_train**2).sum()
+            print(
+                f"Epoch {epoch:4d}: loss={epoch_loss:.4e}, rel_err={rel_err.item():.4f}"
+            )
 
     return model

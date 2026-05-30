@@ -42,6 +42,7 @@ class FrozenEddyViscosity:
     def from_numpy(cls, mu_t_array, device: str = "cpu") -> "FrozenEddyViscosity":
         """Create from a numpy array."""
         import numpy as np
+
         if isinstance(mu_t_array, np.ndarray):
             mu_t = torch.tensor(mu_t_array, dtype=torch.float32, device=device)
         else:
@@ -64,10 +65,12 @@ class FrozenEddyViscosity:
         friction velocity calculation from bulk Reynolds number.
         """
         import warnings
+
         warnings.warn(
             "mixing_length_model() requires u_tau; use mixing_length_channel() or "
             "from_blasius() instead.",
-            DeprecationWarning, stacklevel=2,
+            DeprecationWarning,
+            stacklevel=2,
         )
         return cls(torch.zeros(ny, nx, dtype=torch.float32, device=device))
 
@@ -97,12 +100,18 @@ class FrozenEddyViscosity:
             device: PyTorch device.
         """
         import math
+
         f = 0.316 * Re ** (-0.25)
         u_tau = U_bulk * math.sqrt(f / 2)
         nu = U_bulk * ly / Re
         return cls.mixing_length_channel(
-            ny=ny, nx=nx, ly=ly, u_tau=u_tau, nu=nu,
-            kappa=kappa, device=device,
+            ny=ny,
+            nx=nx,
+            ly=ly,
+            u_tau=u_tau,
+            nu=nu,
+            kappa=kappa,
+            device=device,
         )
 
     @classmethod
@@ -152,11 +161,11 @@ class FrozenEddyViscosity:
         du_dy = torch.where(
             y_plus > 11.0,
             u_tau / (kappa * y_wall + 1e-10),
-            torch.tensor(u_tau ** 2 / nu, dtype=torch.float32, device=device),
+            torch.tensor(u_tau**2 / nu, dtype=torch.float32, device=device),
         )
 
         # Eddy viscosity: μ_t = l_mix² * |du/dy|
-        mu_t_1d = l_mix ** 2 * du_dy.abs()
+        mu_t_1d = l_mix**2 * du_dy.abs()
 
         # Broadcast to 2D (uniform in x for fully-developed channel)
         mu_t = mu_t_1d.unsqueeze(1).expand(ny, nx)
@@ -174,9 +183,7 @@ class FrozenEddyViscosity:
         """
         return self.mu_t + mu
 
-    def effective_thermal_diffusivity(
-        self, alpha: float, Pr_t: float = 0.9
-    ) -> Tensor:
+    def effective_thermal_diffusivity(self, alpha: float, Pr_t: float = 0.9) -> Tensor:
         """Compute effective thermal diffusivity α_eff = α + μ_t / Pr_t.
 
         Turbulent Prandtl number Pr_t ≈ 0.9 is standard for wall-bounded flows.

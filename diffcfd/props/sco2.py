@@ -22,6 +22,7 @@ D.4: ``CoolPropPropertySurrogate`` wraps the sCO2-TMSR-Toolkit's
 data) with monotonicity and positivity constraints, providing higher accuracy
 than the simplified Peng-Robinson EOS used by ``SCO2Surrogate``.
 """
+
 from __future__ import annotations
 
 import enum
@@ -39,6 +40,7 @@ PC = 7.377e6  # Pa (7.377 MPa)
 
 class PhaseStatus(enum.IntEnum):
     """Thermodynamic state classification (borrowed from sCO2-TMSR-Toolkit)."""
+
     OK = 0
     TWO_PHASE = 1
     NEAR_CRITICAL = 2
@@ -69,8 +71,10 @@ def classify_point(
     status = torch.full_like(T, PhaseStatus.OK, dtype=torch.int32)
 
     # Near-critical region
-    near_crit = (T - TC).abs() < near_crit_dT & (P - PC).abs() < near_crit_dP
-    status = torch.where(near_crit, torch.tensor(PhaseStatus.NEAR_CRITICAL, dtype=torch.int32), status)
+    near_crit = ((T - TC).abs() < near_crit_dT) & ((P - PC).abs() < near_crit_dP)
+    status = torch.where(
+        near_crit, torch.tensor(PhaseStatus.NEAR_CRITICAL, dtype=torch.int32), status
+    )
 
     return status
 
@@ -136,8 +140,8 @@ class SCO2Surrogate(nn.Module, ThermophysicalProps):
 
     def _normalize(self, T: Tensor, p: Tensor) -> Tensor:
         """Normalize inputs to ~[-1, 1] around the critical point."""
-        T_n = (T - TC) / (0.2 * TC)       # centered at Tc, scaled by 0.2*Tc
-        p_n = (p - PC) / (0.5 * PC)       # centered at Pc, scaled by 0.5*Pc
+        T_n = (T - TC) / (0.2 * TC)  # centered at Tc, scaled by 0.2*Tc
+        p_n = (p - PC) / (0.5 * PC)  # centered at Pc, scaled by 0.5*Pc
         return torch.stack([T_n, p_n], dim=-1)
 
     def density(self, T: Tensor, p: Tensor) -> Tensor:
@@ -168,24 +172,22 @@ class SCO2Surrogate(nn.Module, ThermophysicalProps):
 
     @classmethod
     def from_pretrained(cls, state_dict: dict, hidden_dim: int = 64) -> "SCO2Surrogate":
-        """Load a pretrained surrogate from a state dict."""
+        """Load a pretrained surrogate from a state dict.
+
+        Accepts either a flat state_dict (from model.state_dict()) or a
+        nested dict with 'density_net', 'viscosity_net', etc. sub-dicts.
+        """
         model = cls(hidden_dim=hidden_dim)
-        model._density_net.load_state_dict(
-            {k.replace("_density_net.", ""): v
-             for k, v in state_dict.items() if k.startswith("_density_net.")}
-        )
-        model._viscosity_net.load_state_dict(
-            {k.replace("_viscosity_net.", ""): v
-             for k, v in state_dict.items() if k.startswith("_viscosity_net.")}
-        )
-        model._conductivity_net.load_state_dict(
-            {k.replace("_conductivity_net.", ""): v
-             for k, v in state_dict.items() if k.startswith("_conductivity_net.")}
-        )
-        model._cp_net.load_state_dict(
-            {k.replace("_cp_net.", ""): v
-             for k, v in state_dict.items() if k.startswith("_cp_net.")}
-        )
+
+        # Detect format: nested (sub-dicts) vs flat (prefixed keys)
+        if "density_net" in state_dict and isinstance(state_dict["density_net"], dict):
+            model._density_net.load_state_dict(state_dict["density_net"])
+            model._viscosity_net.load_state_dict(state_dict["viscosity_net"])
+            model._conductivity_net.load_state_dict(state_dict["conductivity_net"])
+            model._cp_net.load_state_dict(state_dict["cp_net"])
+        else:
+            model.load_state_dict(state_dict, strict=False)
+
         model._trained = True
         return model
 
@@ -229,17 +231,21 @@ def generate_training_data(
 
     # Thermal conductivity: enhanced near critical point
     k_base = 0.05
-    k_peak = 0.3 * torch.exp(-50.0 * delta_T ** 2)
+    k_peak = 0.3 * torch.exp(-50.0 * delta_T**2)
     k = k_base + k_peak * (rho / 400.0) ** 0.3
 
     # Specific heat: peaks near critical point (divergent behavior)
     cp_base = 1000.0
-    cp_peak = 5000.0 * torch.exp(-30.0 * delta_T ** 2)
+    cp_peak = 5000.0 * torch.exp(-30.0 * delta_T**2)
     cp = cp_base + cp_peak
 
     return {
-        "T": T_flat, "p": p_flat,
-        "rho": rho, "mu": mu, "k": k, "cp": cp,
+        "T": T_flat,
+        "p": p_flat,
+        "rho": rho,
+        "mu": mu,
+        "k": k,
+        "cp": cp,
     }
 
 
@@ -276,13 +282,18 @@ def train_sco2_surrogate(
         k_pred = model.conductivity(T, p)
         cp_pred = model.specific_heat(T, p)
 
-        # Log-relative MSE loss
-        loss_rho = ((rho_pred - data["rho"].to(device)) ** 2).mean()
-        loss_mu = ((mu_pred - data["mu"].to(device)) ** 2).mean()
-        loss_k = ((k_pred - data["k"].to(device)) ** 2).mean()
-        loss_cp = ((cp_pred - data["cp"].to(device)) ** 2).mean()
+        # Relative MSE loss (auto-scaled by data magnitude)
+        rho_ref = data["rho"].to(device)
+        mu_ref = data["mu"].to(device)
+        k_ref = data["k"].to(device)
+        cp_ref = data["cp"].to(device)
 
-        loss = loss_rho + loss_mu * 1e8 + loss_k * 1e4 + loss_cp * 1e-6
+        loss_rho = ((rho_pred - rho_ref) / (rho_ref.abs().mean() + 1e-8)).pow(2).mean()
+        loss_mu = ((mu_pred - mu_ref) / (mu_ref.abs().mean() + 1e-8)).pow(2).mean()
+        loss_k = ((k_pred - k_ref) / (k_ref.abs().mean() + 1e-8)).pow(2).mean()
+        loss_cp = ((cp_pred - cp_ref) / (cp_ref.abs().mean() + 1e-8)).pow(2).mean()
+
+        loss = loss_rho + loss_mu + loss_k + loss_cp
         loss.backward()
         opt.step()
 
@@ -300,6 +311,7 @@ def train_sco2_surrogate(
 # ---------------------------------------------------------------------------
 # D.4: CoolProp-trained surrogate (from sCO2-TMSR-Toolkit PropertySurrogate)
 # ---------------------------------------------------------------------------
+
 
 class CoolPropPropertySurrogate(nn.Module, ThermophysicalProps):
     """sCO2 surrogate trained on actual CoolProp/NIST REFPROP data.
@@ -384,7 +396,9 @@ class CoolPropPropertySurrogate(nn.Module, ThermophysicalProps):
         return self._denormalize("specific_heat", raw)
 
     @classmethod
-    def from_coolprop_surrogate(cls, state: dict, hidden_dim: int = 64, device: str = "cpu") -> "CoolPropPropertySurrogate":
+    def from_coolprop_surrogate(
+        cls, state: dict, hidden_dim: int = 64, device: str = "cpu"
+    ) -> "CoolPropPropertySurrogate":
         """Load from a sCO2-TMSR-Toolkit ``PropertySurrogate.state_dict()``.
 
         The sCO2-TMSR-Toolkit's ``PropertySurrogate`` trains 4 MLPs on actual
@@ -410,11 +424,11 @@ class CoolPropPropertySurrogate(nn.Module, ThermophysicalProps):
         model._conductivity_net.load_state_dict(state["conductivity_net"])
         model._cp_net.load_state_dict(state["cp_net"])
 
-        # Load normalization stats
-        model._T_mean = torch.tensor(state["T_mean"], device=device)
-        model._T_std = torch.tensor(state["T_std"], device=device)
-        model._P_mean = torch.tensor(state["P_mean"], device=device)
-        model._P_std = torch.tensor(state["P_std"], device=device)
+        # Load normalization stats (use copy_ to preserve registered buffers)
+        model._T_mean.copy_(torch.tensor(state["T_mean"], device=device))
+        model._T_std.copy_(torch.tensor(state["T_std"], device=device))
+        model._P_mean.copy_(torch.tensor(state["P_mean"], device=device))
+        model._P_std.copy_(torch.tensor(state["P_std"], device=device))
 
         # Load output denormalization stats
         if "stats" in state:

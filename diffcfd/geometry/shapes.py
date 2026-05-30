@@ -34,11 +34,10 @@ def channel_sdf(
 ) -> Tensor:
     """SDF for channel walls (flat plates at y=bottom and y=top).
 
-    For pure channel flow (no immersed body), returns all-positive SDF.
+    For pure channel flow (no immersed body), returns all-positive SDF
+    (entire domain is fluid). The wall positions are handled by the
+    boundary condition system rather than Brinkman penalization.
     """
-    _, y = mesh.cell_centers()
-    if wall_y_top is None:
-        wall_y_top = mesh.ly
     return torch.ones(mesh.ny, mesh.nx, device=mesh.device)
 
 
@@ -90,12 +89,17 @@ def naca0012_sdf(
     # Normalized x/c
     xn = x_rot / chord
     xn = torch.clamp(xn, 0.0, 1.0)
-    half_thickness = chord * 0.12 / 0.2 * (
-        0.2969 * torch.sqrt(xn + 1e-10)
-        - 0.1260 * xn
-        - 0.3516 * xn ** 2
-        + 0.2843 * xn ** 3
-        - 0.1015 * xn ** 4
+    half_thickness = (
+        chord
+        * 0.12
+        / 0.2
+        * (
+            0.2969 * torch.sqrt(xn + 1e-10)
+            - 0.1260 * xn
+            - 0.3516 * xn**2
+            + 0.2843 * xn**3
+            - 0.1015 * xn**4
+        )
     )
 
     # SDF: distance to nearest surface point (approximate)
@@ -106,8 +110,8 @@ def naca0012_sdf(
         y_dist,
         torch.sqrt(
             torch.minimum(
-                (x_rot) ** 2 + y_rot ** 2,
-                (x_rot - chord) ** 2 + y_rot ** 2,
+                (x_rot) ** 2 + y_rot**2,
+                (x_rot - chord) ** 2 + y_rot**2,
             )
         ),
     )

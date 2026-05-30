@@ -52,9 +52,11 @@ def gmres_matfree(
     x = x0.clone() if x0 is not None else torch.zeros_like(b)
     total_iters = 0
     converged = False
+    r = None  # reuse residual across restart cycles
 
     for _ in range(max(1, max_iter // restart + 1)):
-        r = b - matvec(x)
+        if r is None:
+            r = b - matvec(x)
         r_norm = r.norm()
         if r_norm < tol * b_norm:
             converged = True
@@ -92,9 +94,11 @@ def gmres_matfree(
             h_j1j = H[j + 1, j]
             denom = torch.sqrt(h_jj * h_jj + h_j1j * h_j1j)
             if denom < 1e-14:
-                cs[j] = 1.0; sn[j] = 0.0
+                cs[j] = 1.0
+                sn[j] = 0.0
             else:
-                cs[j] = h_jj / denom; sn[j] = h_j1j / denom
+                cs[j] = h_jj / denom
+                sn[j] = h_j1j / denom
 
             H[j, j] = cs[j] * H[j, j] + sn[j] * H[j + 1, j]
             H[j + 1, j] = 0.0
@@ -112,12 +116,17 @@ def gmres_matfree(
 
         H_sq = H[:j_used, :j_used]
         e_sq = e1[:j_used]
-        y = torch.linalg.solve_triangular(H_sq, e_sq.unsqueeze(1), upper=True).squeeze(1)
+        y = torch.linalg.solve_triangular(H_sq, e_sq.unsqueeze(1), upper=True).squeeze(
+            1
+        )
         Q_mat = torch.stack(Q[:j_used], dim=1)
         x = x + Q_mat @ y
 
         if converged:
             break
+
+        # Compute residual for next restart cycle (avoids redundant matvec)
+        r = b - matvec(x)
 
     return x, total_iters
 
@@ -160,7 +169,14 @@ def scipy_gmres(
     def callback(_):
         iters_count[0] += 1
 
-    x_np, info = spla.gmres(A_lo, b_np, x0=x0_np, rtol=tol, maxiter=max_iter,
-                             callback=callback, callback_type='legacy')
+    x_np, info = spla.gmres(
+        A_lo,
+        b_np,
+        x0=x0_np,
+        rtol=tol,
+        maxiter=max_iter,
+        callback=callback,
+        callback_type="legacy",
+    )
     x = torch.tensor(x_np, dtype=b.dtype, device=b.device)
     return x, iters_count[0]

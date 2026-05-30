@@ -33,7 +33,7 @@ References:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import scipy.sparse as sp
@@ -62,17 +62,25 @@ class _SteadyStateNS(torch.autograd.Function):
         sdf_val = sdf.detach() if sdf is not None else None
         if case == "channel":
             ux, uy, p, a_ux, a_uy = solver._run_simple(
-                sdf_val, inlet_velocity=theta_val, lid_velocity=0.0, case=case,
-                return_aP=True
+                sdf_val,
+                inlet_velocity=theta_val,
+                lid_velocity=0.0,
+                case=case,
+                return_aP=True,
             )
         else:
             ux, uy, p, a_ux, a_uy = solver._run_simple(
-                sdf_val, inlet_velocity=0.0, lid_velocity=theta_val, case=case,
-                return_aP=True
+                sdf_val,
+                inlet_velocity=0.0,
+                lid_velocity=theta_val,
+                case=case,
+                return_aP=True,
             )
         u_star = solver._pack_interior(ux, uy).detach()
         # Save both theta and sdf for backward (both need requires_grad tracking)
-        ctx.save_for_backward(u_star, theta, sdf_val if sdf_val is not None else torch.tensor([]))
+        ctx.save_for_backward(
+            u_star, theta, sdf_val if sdf_val is not None else torch.tensor([])
+        )
         ctx.solver = solver
         ctx.case = case
         ctx.p = p.detach()
@@ -104,10 +112,12 @@ class _SteadyStateNS(torch.autograd.Function):
         z_star = torch.cat([u_star, p_star])
         n_u = u_star.shape[0]
 
-        loss_u = torch.cat([
-            dL_dux[1:-1, 1:-1].flatten(),
-            dL_duy[1:-1, :].flatten(),
-        ])
+        loss_u = torch.cat(
+            [
+                dL_dux[1:-1, 1:-1].flatten(),
+                dL_duy[1:-1, :].flatten(),
+            ]
+        )
         loss_z = torch.cat([loss_u, dL_dp.flatten()])
 
         theta_d = theta.detach().requires_grad_(True)
@@ -126,6 +136,7 @@ class _SteadyStateNS(torch.autograd.Function):
             return vjp_fn(v)[0]
 
         from diffcfd.utils.linalg import gmres_matfree
+
         lambda_sol, _ = gmres_matfree(
             matvec_Jt, loss_z.detach(), tol=1e-5, max_iter=2000, restart=200
         )
@@ -204,7 +215,7 @@ class NavierStokes2D:
         sdf: Tensor | None = None,
         inlet_velocity: float | Tensor = 1.0,
         lid_velocity: float | Tensor = 0.0,
-        case: str = "channel",
+        case: Literal["channel", "cavity"] = "channel",
         buoyancy_src: Tensor | None = None,
         u_body_x: Tensor | None = None,
         u_body_y: Tensor | None = None,
@@ -227,22 +238,28 @@ class NavierStokes2D:
                 theta = (
                     inlet_velocity
                     if isinstance(inlet_velocity, Tensor)
-                    else torch.tensor(float(inlet_velocity), dtype=torch.float32,
-                                      device=self.device)
+                    else torch.tensor(
+                        float(inlet_velocity), dtype=torch.float32, device=self.device
+                    )
                 )
             else:
                 theta = (
                     lid_velocity
                     if isinstance(lid_velocity, Tensor)
-                    else torch.tensor(float(lid_velocity), dtype=torch.float32,
-                                      device=self.device)
+                    else torch.tensor(
+                        float(lid_velocity), dtype=torch.float32, device=self.device
+                    )
                 )
             return _SteadyStateNS.apply(theta, self, case, sdf)
         else:
             return self._run_simple(
-                sdf, inlet_velocity, lid_velocity, case,
+                sdf,
+                inlet_velocity,
+                lid_velocity,
+                case,
                 buoyancy_src=buoyancy_src,
-                u_body_x=u_body_x, u_body_y=u_body_y,
+                u_body_x=u_body_x,
+                u_body_y=u_body_y,
             )
 
     def _run_simple(
@@ -250,7 +267,7 @@ class NavierStokes2D:
         sdf: Tensor | None = None,
         inlet_velocity: float | Tensor = 1.0,
         lid_velocity: float | Tensor = 0.0,
-        case: str = "channel",
+        case: Literal["channel", "cavity"] = "channel",
         return_aP: bool = False,
         buoyancy_src: Tensor | None = None,
         u_body_x: Tensor | None = None,
@@ -279,7 +296,7 @@ class NavierStokes2D:
         # Initialise
         ux = torch.zeros(ny, nx + 1, device=dev)
         uy = torch.zeros(ny + 1, nx, device=dev)
-        p  = torch.zeros(ny, nx, device=dev)
+        p = torch.zeros(ny, nx, device=dev)
         ux, uy, p = self._apply_bcs(ux, uy, p, inlet_velocity, lid_velocity, case)
 
         # Anderson acceleration state
@@ -292,14 +309,39 @@ class NavierStokes2D:
 
             # Step 1: implicit momentum solve
             ux_star, a_ux = _solve_u(
-                ux, uy, p, nu, dx, dy, self.alpha_u, brinkman, nx, ny,
-                inlet_velocity, lid_velocity, case,
-                nu_field=nu_field, u_body=u_body_x
+                ux,
+                uy,
+                p,
+                nu,
+                dx,
+                dy,
+                self.alpha_u,
+                brinkman,
+                nx,
+                ny,
+                inlet_velocity,
+                lid_velocity,
+                case,
+                nu_field=nu_field,
+                u_body=u_body_x,
             )
             uy_star, a_uy = _solve_v(
-                ux, uy, p, nu, dx, dy, self.alpha_u, brinkman, nx, ny,
-                inlet_velocity, lid_velocity, case,
-                buoyancy_src=buoyancy_src, nu_field=nu_field, u_body=u_body_y
+                ux,
+                uy,
+                p,
+                nu,
+                dx,
+                dy,
+                self.alpha_u,
+                brinkman,
+                nx,
+                ny,
+                inlet_velocity,
+                lid_velocity,
+                case,
+                buoyancy_src=buoyancy_src,
+                nu_field=nu_field,
+                u_body=u_body_y,
             )
 
             ux_star, uy_star, _ = self._apply_bcs(
@@ -307,7 +349,7 @@ class NavierStokes2D:
             )
 
             # Step 2: pressure correction with SIMPLE weighting
-            div_star = _divergence(ux_star, uy_star, dx, dy)   # (ny, nx)
+            div_star = _divergence(ux_star, uy_star, dx, dy)  # (ny, nx)
             L_p, pin = _build_pressure_system(a_ux, a_uy, dx, dy, nx, ny)
             p_prime = _solve_sparse(-div_star.detach().numpy(), L_p, pin, nx, ny, dev)
 
@@ -353,8 +395,8 @@ class NavierStokes2D:
                                 n_ux = ny * (nx + 1)
                                 n_uy = (ny + 1) * nx
                                 ux = x_new[:n_ux].reshape(ny, nx + 1)
-                                uy = x_new[n_ux:n_ux + n_uy].reshape(ny + 1, nx)
-                                p = x_new[n_ux + n_uy:].reshape(ny, nx)
+                                uy = x_new[n_ux : n_ux + n_uy].reshape(ny + 1, nx)
+                                p = x_new[n_ux + n_uy :].reshape(ny, nx)
                         except RuntimeError:
                             pass  # lstsq singular — skip this iteration
                 else:
@@ -367,6 +409,21 @@ class NavierStokes2D:
     def pressure_drop(self, ux: Tensor, uy: Tensor, p: Tensor) -> Tensor:
         """Scalar ΔP = mean(p[:, 0]) − mean(p[:, -1]). Differentiable."""
         return p[:, 0].mean() - p[:, -1].mean()
+
+    def dissipation(self, ux: Tensor, uy: Tensor, p: Tensor) -> Tensor:
+        """Viscous dissipation rate: Φ = 2ν ∫(∂u_i/∂x_j)² dV. Differentiable."""
+        dx, dy = self.mesh.dx, self.mesh.dy
+        nu = self._nu
+        dudx = (ux[:, 1:] - ux[:, :-1]) / dx
+        dvdy = (uy[1:, :] - uy[:-1, :]) / dy
+        ux_cc = 0.5 * (ux[:, :-1] + ux[:, 1:])
+        dudy = (ux_cc[1:, :] - ux_cc[:-1, :]) / dy
+        uy_cc = 0.5 * (uy[:-1, :] + uy[1:, :])
+        dvdx = (uy_cc[:, 1:] - uy_cc[:, :-1]) / dx
+        strain_sq = (
+            2 * dudx[:-1, :] ** 2 + 2 * dvdy[:, :-1] ** 2 + (dudy + dvdx[:-1, :]) ** 2
+        )
+        return nu * strain_sq.sum() * dx * dy
 
     def _pack_interior(self, ux: Tensor, uy: Tensor) -> Tensor:
         """Flatten interior velocity components into a single vector.
@@ -389,7 +446,7 @@ class NavierStokes2D:
         u_flat: Tensor,
         theta: Tensor,
         p: Tensor,
-        case: str,
+        case: Literal["channel", "cavity"],
         brinkman: Tensor | None = None,
     ) -> Tensor:
         """Pure-PyTorch unrelaxed NS momentum residual at state u_flat.
@@ -421,21 +478,21 @@ class NavierStokes2D:
         ux = torch.zeros(ny, nx + 1, device=dev, dtype=dt)
         uy = torch.zeros(ny + 1, nx, device=dev, dtype=dt)
 
-        ux[1:-1, 1:-1] = ux_int   # interior x-faces
-        uy[1:-1, :] = uy_int      # interior y-faces
+        ux[1:-1, 1:-1] = ux_int  # interior x-faces
+        uy[1:-1, :] = uy_int  # interior y-faces
 
         # Boundary values
         if case == "channel":
-            ux[:, 0] = theta            # inlet: all rows set to theta
-            ux[:, -1] = ux[:, -2]      # outlet zero-gradient (Neumann)
+            ux[:, 0] = theta  # inlet: all rows set to theta
+            ux[:, -1] = ux[:, -2]  # outlet zero-gradient (Neumann)
             # top/bottom walls: ux rows 0 and -1 already 0 (zeros_like)
         elif case == "cavity":
-            ux[-1, :] = theta           # lid: top row = theta (lid_velocity)
+            ux[-1, :] = theta  # lid: top row = theta (lid_velocity)
             # top/bottom: ux rows 0 and -1 already 0
 
         # Wall BCs for uy (all cases): uy[0,:]=0 and uy[-1,:]=0 already 0
         if case == "cavity":
-            uy[:, 0] = 0.0             # left/right walls for uy
+            uy[:, 0] = 0.0  # left/right walls for uy
             uy[:, -1] = 0.0
 
         # ------------------------------------------------------------------
@@ -443,14 +500,16 @@ class NavierStokes2D:
         # physical col = ii+1, so ux[:, 1:-1] are the interior faces
         # ------------------------------------------------------------------
         # Face-averaged viscosity for x-faces: average of left and right cell
-        nu_x_face = 0.5 * (nu[1:-1, :-1] + nu[1:-1, 1:]) if isinstance(nu, Tensor) else nu
+        nu_x_face = (
+            0.5 * (nu[1:-1, :-1] + nu[1:-1, 1:]) if isinstance(nu, Tensor) else nu
+        )
         nu_y_face = 0.5 * (nu[:-1, :] + nu[1:, :]) if isinstance(nu, Tensor) else nu
-        D = nu_x_face / dx   # diffusion coefficient (x-direction)
+        D = nu_x_face / dx  # diffusion coefficient (x-direction)
         Dn = nu_y_face / dy
 
         # Interior ux block: shape (ny-2, nx-1), rows j=1..ny-2, cols ii=0..nx-2
         # u_c = ux[1:-1, 1:-1]  (already = ux_int but through ux tensor for grad)
-        u_c = ux[1:-1, 1:-1]    # (ny-2, nx-1)
+        u_c = ux[1:-1, 1:-1]  # (ny-2, nx-1)
 
         # East face velocity (for Pe number): average of u_c and east neighbor
         # East neighbor: for col ii → ux[j, ii+2] = ux[1:-1, 2:]  (shape ny-2, nx-2)
@@ -460,18 +519,21 @@ class NavierStokes2D:
 
         # West face velocity: ux[1:-1, 0:-2+1] = ux[1:-1, :-1]  includes col 0 (inlet)
         # West of col ii=0 is inlet face ux[j,0]=theta; west of col ii→ux[j,ii]
-        u_w_face = 0.5 * (ux[1:-1, :-2] + u_c)   # (ny-2, nx-1): ux[j,ii] + u_c
+        u_w_face = 0.5 * (ux[1:-1, :-2] + u_c)  # (ny-2, nx-1): ux[j,ii] + u_c
 
         # v at x-face: bilinear average of 4 surrounding y-face values
         # uy has shape (ny+1, nx); interior ux rows are j=1..ny-2
         # SW = uy[j, ii], SE = uy[j, ii+1], NW = uy[j+1, ii], NE = uy[j+1, ii+1]
         # Array: j=1..ny-2 → uy[1:-2, :]; j+1=2..ny-1 → uy[2:-1, :]
-        v_sw = uy[1:-2, :-1]    # uy[j,   ii]     (ny-2, nx-1)
-        v_se = uy[1:-2, 1:]     # uy[j,   ii+1]   (ny-2, nx-1)
-        v_nw = uy[2:-1, :-1]    # uy[j+1, ii]     (ny-2, nx-1)
-        v_ne = uy[2:-1, 1:]     # uy[j+1, ii+1]   (ny-2, nx-1)
+        v_sw = uy[1:-2, :-1]  # uy[j,   ii]     (ny-2, nx-1)
+        v_se = uy[1:-2, 1:]  # uy[j,   ii+1]   (ny-2, nx-1)
+        v_nw = uy[2:-1, :-1]  # uy[j+1, ii]     (ny-2, nx-1)
+        v_ne = uy[2:-1, 1:]  # uy[j+1, ii+1]   (ny-2, nx-1)
         v_c = 0.25 * (v_sw + v_se + v_nw + v_ne)
 
+        # Both north and south cross-flow use the same bilinear-averaged v-velocity
+        # at the u-face center. This intentionally matches the forward Rust solver's
+        # convention, ensuring R(u*, θ) ≈ 0 at the converged state for valid implicit diff.
         F_e = u_e_face
         F_w = u_w_face
         F_n = v_c
@@ -479,24 +541,21 @@ class NavierStokes2D:
 
         def h(F, D_val):
             D_t = torch.as_tensor(D_val, dtype=F.dtype, device=F.device)
-            return torch.clamp(D_t - 0.5 * torch.abs(F), min=0.0) + torch.clamp(-F, min=0.0)
+            return torch.clamp(D_t - 0.5 * torch.abs(F), min=0.0) + torch.clamp(
+                -F, min=0.0
+            )
 
-        a_e_full = h(F_e, D)    # (ny-2, nx-1)
-        a_w_full = h(-F_w, D)   # (ny-2, nx-1)
-        a_n_full = h(F_n, Dn)   # (ny-2, nx-1)
+        a_e_full = h(F_e, D)  # (ny-2, nx-1)
+        a_w_full = h(-F_w, D)  # (ny-2, nx-1)
+        a_n_full = h(F_n, Dn)  # (ny-2, nx-1)
         a_s_full = h(-F_s, Dn)  # (ny-2, nx-1)
 
         # Neumann outlet: zero east coefficient for rightmost interior col (ii=nx-2)
         a_e_full = a_e_full.clone()
         a_e_full[:, -1] = 0.0
-        # East: col ii=nx-2 has no east interior neighbor → zero contribution in matrix
-        mask_e = torch.ones(nx - 1, dtype=torch.bool, device=dev)
-        mask_e[-1] = False   # rightmost interior col: no east interior neighbor
-        mask_w = torch.ones(nx - 1, dtype=torch.bool, device=dev)
-        mask_w[0] = False    # leftmost interior col: no west interior neighbor (inlet BC source)
 
         # Brinkman face value
-        bk_face = 0.5 * (brinkman[1:-1, :-1] + brinkman[1:-1, 1:])   # (ny-2, nx-1)
+        bk_face = 0.5 * (brinkman[1:-1, :-1] + brinkman[1:-1, 1:])  # (ny-2, nx-1)
 
         # North/south boundary handling:
         # Row j=ny-2 (j_int=ny-3): north neighbor is top wall (row ny-1) → BC source, no matrix entry
@@ -504,16 +563,20 @@ class NavierStokes2D:
         # Interior rows: a_n and a_s go into neighbor terms
 
         # Boundary wall velocities
-        u_north_wall = theta if case == "cavity" else torch.zeros(1, device=dev, dtype=dt).squeeze()
+        u_north_wall = (
+            theta
+            if case == "cavity"
+            else torch.zeros(1, device=dev, dtype=dt).squeeze()
+        )
         u_south_wall = torch.zeros(1, device=dev, dtype=dt).squeeze()
 
         # North boundary contribution (row j=ny-2, i.e. last row of u_c):
         # a_n_val * u_north_wall → source
-        a_n_bc = a_n_full[-1:, :]     # (1, nx-1): BC row
+        a_n_bc = a_n_full[-1:, :]  # (1, nx-1): BC row
         _src_n_bc = (a_n_bc * u_north_wall).unsqueeze(0)  # → added to RHS for last row
 
         # South boundary contribution (row j=1, i.e. first row of u_c):
-        a_s_bc = a_s_full[:1, :]      # (1, nx-1): BC row
+        a_s_bc = a_s_full[:1, :]  # (1, nx-1): BC row
         _src_s_bc = (a_s_bc * u_south_wall).unsqueeze(0)
 
         # West boundary (inlet) contribution (col ii=0):
@@ -523,55 +586,59 @@ class NavierStokes2D:
             inlet_val = theta
         else:
             inlet_val = torch.zeros(1, device=dev, dtype=dt).squeeze()
-        a_w_bc = a_w_full[:, :1]   # (ny-2, 1)
+        a_w_bc = a_w_full[:, :1]  # (ny-2, 1)
         src_w_bc = a_w_bc * inlet_val  # (ny-2, 1)
 
         # Build a_P0 (sum of all neighbor coefficients, incl. BC ones):
-        a_P0_u = a_e_full + a_w_full + a_n_full + a_s_full + bk_face   # (ny-2, nx-1)
+        a_P0_u = a_e_full + a_w_full + a_n_full + a_s_full + bk_face  # (ny-2, nx-1)
 
         # Residual = a_P0 * u_c  -  sum(a_nb * u_nb)  -  dp/dx  -  bc_sources
         # Neighbor contributions (interior only, mask out boundary cols):
         nb_e = torch.zeros_like(u_c)
-        nb_e[:, :-1] = a_e_full[:, :-1] * u_c[:, 1:]   # east: u[j, ii+2] = u_c shifted
+        nb_e[:, :-1] = a_e_full[:, :-1] * u_c[:, 1:]  # east: u[j, ii+2] = u_c shifted
 
         nb_w = torch.zeros_like(u_c)
-        nb_w[:, 1:] = a_w_full[:, 1:] * u_c[:, :-1]    # west: u[j, ii] = u_c shifted
+        nb_w[:, 1:] = a_w_full[:, 1:] * u_c[:, :-1]  # west: u[j, ii] = u_c shifted
 
         nb_n = torch.zeros_like(u_c)
-        nb_n[:-1, :] = a_n_full[:-1, :] * u_c[1:, :]   # north: u[j+1, ...]
+        nb_n[:-1, :] = a_n_full[:-1, :] * u_c[1:, :]  # north: u[j+1, ...]
 
         nb_s = torch.zeros_like(u_c)
-        nb_s[1:, :] = a_s_full[1:, :] * u_c[:-1, :]    # south: u[j-1, ...]
+        nb_s[1:, :] = a_s_full[1:, :] * u_c[:-1, :]  # south: u[j-1, ...]
 
         # Pressure gradient (using converged p, treated as constant)
         # Momentum source = (p_w - p_e) * dy / dx (area-weighted, divided by dx)
-        dp_dx = (p[1:-1, 1:] - p[1:-1, :-1]) / dx   # (ny-2, nx-1): p[j,ii+1]-p[j,ii]
+        dp_dx = (p[1:-1, 1:] - p[1:-1, :-1]) / dx  # (ny-2, nx-1): p[j,ii+1]-p[j,ii]
 
         R_ux = a_P0_u * u_c - nb_e - nb_w - nb_n - nb_s - (-dp_dx * dy)
         # Subtract BC source contributions (already removed from matrix side)
         # For north BC row: a_n_bc * u_north_wall was added to RHS in solve; in residual it's on LHS side
         R_ux[-1:, :] -= a_n_bc * u_north_wall
-        R_ux[:1, :]  -= a_s_bc * u_south_wall
-        R_ux[:, :1]  -= src_w_bc    # inlet BC: a_w contribution
+        R_ux[:1, :] -= a_s_bc * u_south_wall
+        R_ux[:, :1] -= src_w_bc  # inlet BC: a_w contribution
 
         # ------------------------------------------------------------------
         # v-momentum residual for interior uy faces: j=1..ny-1 (all nx cols)
         # ------------------------------------------------------------------
         # Cell-center viscosity for v-momentum cells (average of j-1 and j rows)
         if isinstance(nu, Tensor):
-            nu_vc = 0.5 * (nu[:-1, :] + nu[1:, :])   # (ny-1, nx)
+            nu_vc = 0.5 * (nu[:-1, :] + nu[1:, :])  # (ny-1, nx)
         else:
             nu_vc = nu
         Dx = nu_vc / dx if isinstance(nu, Tensor) else nu / dx
         Dy = nu_vc / dy if isinstance(nu, Tensor) else nu / dy
 
-        v_c = uy[1:-1, :]    # (ny-1, nx): interior uy = uy_int
+        v_c = uy[1:-1, :]  # (ny-1, nx): interior uy = uy_int
 
         # North face: uy[j+1, i] — for j=ny-1 (top interior face), j+1=ny is the wall
-        uy_n_nb = torch.cat([uy[2:-1, :], torch.zeros(1, nx, device=dev, dtype=dt)], dim=0)  # (ny-1, nx)
+        uy_n_nb = torch.cat(
+            [uy[2:-1, :], torch.zeros(1, nx, device=dev, dtype=dt)], dim=0
+        )  # (ny-1, nx)
         v_n_face = 0.5 * (uy_n_nb + v_c)  # but top wall is 0, already in zeros
 
-        uy_s_nb = torch.cat([torch.zeros(1, nx, device=dev, dtype=dt), uy[1:-2, :]], dim=0)  # (ny-1, nx)
+        uy_s_nb = torch.cat(
+            [torch.zeros(1, nx, device=dev, dtype=dt), uy[1:-2, :]], dim=0
+        )  # (ny-1, nx)
         v_s_face = 0.5 * (uy_s_nb + v_c)
 
         # u at y-face: bilinear average of surrounding x-face values
@@ -579,48 +646,48 @@ class NavierStokes2D:
         # uy interior rows 1..ny-1 → ux rows j-1 and j = rows 0..ny-2 and 1..ny-1
         # In array coords: row jj (0-indexed interior) → physical j = jj+1
         # ux rows for j-1 = 0..ny-2 → ux[:-1, :], for j = 1..ny-1 → ux[1:, :]
-        u_sw = ux[:-1, :-1]    # ux[j-1, i]   (ny-1, nx)
-        u_se = ux[:-1, 1:]     # ux[j-1, i+1] (ny-1, nx)
-        u_nw = ux[1:, :-1]     # ux[j,   i]   (ny-1, nx)
-        u_ne = ux[1:, 1:]      # ux[j,   i+1] (ny-1, nx)
+        u_sw = ux[:-1, :-1]  # ux[j-1, i]   (ny-1, nx)
+        u_se = ux[:-1, 1:]  # ux[j-1, i+1] (ny-1, nx)
+        u_nw = ux[1:, :-1]  # ux[j,   i]   (ny-1, nx)
+        u_ne = ux[1:, 1:]  # ux[j,   i+1] (ny-1, nx)
         u_c_v = 0.25 * (u_sw + u_se + u_nw + u_ne)
 
         # v-momentum fluxes
         # North: top interior face (jj=ny-2) has no north neighbor (wall uy=0)
         F_vn = torch.where(
             torch.arange(ny - 1, device=dev).unsqueeze(1) < ny - 2,
-            v_n_face, torch.zeros_like(v_n_face)
+            v_n_face,
+            torch.zeros_like(v_n_face),
         )
         F_vs = v_s_face
         # East/West: lateral walls have uy=0 (for cavity/channel both)
         F_ve_all = u_c_v
         F_vw_all = u_c_v
 
-        _D_vn = torch.where(
-            torch.arange(ny - 1, device=dev).unsqueeze(1) < ny - 2,
-            torch.full((1,), Dy, device=dev, dtype=dt),
-            torch.zeros((1,), device=dev, dtype=dt)
-        )
-        _D_vs = torch.full((ny - 1, nx), Dy, device=dev, dtype=dt)
-
         a_vn_full = torch.where(
             torch.arange(ny - 1, device=dev).unsqueeze(1) < ny - 2,
-            h(F_vn, Dy), torch.zeros(1, device=dev, dtype=dt)
+            h(F_vn, Dy),
+            torch.zeros(1, device=dev, dtype=dt),
         )
         a_vs_full = torch.where(
             torch.arange(ny - 1, device=dev).unsqueeze(1) > 0,
-            h(-F_vs, Dy), torch.zeros(1, device=dev, dtype=dt)
+            h(-F_vs, Dy),
+            torch.zeros(1, device=dev, dtype=dt),
         )
         a_ve_full = torch.where(
             torch.arange(nx, device=dev).unsqueeze(0) < nx - 1,
-            h(F_ve_all, Dx), torch.zeros(1, device=dev, dtype=dt)
+            h(F_ve_all, Dx),
+            torch.zeros(1, device=dev, dtype=dt),
         )
         a_vw_full = torch.where(
             torch.arange(nx, device=dev).unsqueeze(0) > 0,
-            h(-F_vw_all, Dx), torch.zeros(1, device=dev, dtype=dt)
+            h(-F_vw_all, Dx),
+            torch.zeros(1, device=dev, dtype=dt),
         )
 
-        bk_v = 0.5 * (brinkman[:-1, :] + brinkman[1:, :])   # (ny-1, nx): average over j-1, j
+        bk_v = 0.5 * (
+            brinkman[:-1, :] + brinkman[1:, :]
+        )  # (ny-1, nx): average over j-1, j
 
         a_P0_v = a_vn_full + a_vs_full + a_ve_full + a_vw_full + bk_v
 
@@ -638,7 +705,7 @@ class NavierStokes2D:
         nb_vw[:, 1:] = a_vw_full[:, 1:] * v_c[:, :-1]
 
         # Pressure gradient for v: (p[j,i] - p[j-1,i]) * dx / dy (area-weighted)
-        dp_dy = (p[1:, :] - p[:-1, :]) / dy    # (ny-1, nx): p[j,i] - p[j-1,i]
+        dp_dy = (p[1:, :] - p[:-1, :]) / dy  # (ny-1, nx): p[j,i] - p[j-1,i]
 
         R_uy = a_P0_v * v_c - nb_vn - nb_vs - nb_ve - nb_vw - (-dp_dy * dx)
 
@@ -650,7 +717,7 @@ class NavierStokes2D:
         v_north_wall = torch.zeros(1, device=dev, dtype=dt).squeeze()
         v_south_wall = torch.zeros(1, device=dev, dtype=dt).squeeze()
         R_uy[-1:, :] -= a_vn_full[-1:, :] * v_north_wall
-        R_uy[:1, :]  -= a_vs_full[:1, :] * v_south_wall
+        R_uy[:1, :] -= a_vs_full[:1, :] * v_south_wall
 
         return torch.cat([R_ux.flatten(), R_uy.flatten()])
 
@@ -659,7 +726,7 @@ class NavierStokes2D:
         z: "Tensor",
         theta: "Tensor",
         n_u: int,
-        case: str,
+        case: Literal["channel", "cavity"],
         brinkman: "Tensor | None" = None,
     ) -> "Tensor":
         """Combined (u, p) residual for implicit differentiation.
@@ -690,7 +757,7 @@ class NavierStokes2D:
         uy[1:-1, :] = uy_int
 
         if case == "channel":
-            ux[1:-1, 0] = theta   # inlet only for interior rows (walls stay 0)
+            ux[1:-1, 0] = theta  # inlet only for interior rows (walls stay 0)
             ux[:, -1] = ux[:, -2]  # Neumann outlet
         elif case == "cavity":
             ux[-1, :] = theta
@@ -731,7 +798,7 @@ class NavierStokes2D:
 # Solver kernels — Rust-accelerated via diffcfd._diffcfd_rust
 # ------------------------------------------------------------------
 
-from diffcfd._diffcfd_rust import (
+from diffcfd._diffcfd_rust import (  # noqa: E402
     build_momentum_u as _rust_build_u,
     build_momentum_v as _rust_build_v,
     build_pressure_system as _rust_build_p,
@@ -739,24 +806,48 @@ from diffcfd._diffcfd_rust import (
 
 
 def _solve_u(
-    ux: Tensor, uy: Tensor, p: Tensor,
-    nu: float, dx: float, dy: float, alpha_u: float,
-    brinkman: Tensor, nx: int, ny: int,
-    inlet_velocity, lid_velocity, case: str,
+    ux: Tensor,
+    uy: Tensor,
+    p: Tensor,
+    nu: float,
+    dx: float,
+    dy: float,
+    alpha_u: float,
+    brinkman: Tensor,
+    nx: int,
+    ny: int,
+    inlet_velocity,
+    lid_velocity,
+    case: Literal["channel", "cavity"],
     nu_field: Tensor | None = None,
     u_body: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Build and solve the implicit u-momentum equation (Rust-accelerated)."""
-    inlet_val = float(inlet_velocity) if isinstance(inlet_velocity, (int, float)) else inlet_velocity.item()
-    lid_val = float(lid_velocity) if isinstance(lid_velocity, (int, float)) else lid_velocity.item()
+    inlet_val = (
+        float(inlet_velocity)
+        if isinstance(inlet_velocity, (int, float))
+        else inlet_velocity.item()
+    )
+    lid_val = (
+        float(lid_velocity)
+        if isinstance(lid_velocity, (int, float))
+        else lid_velocity.item()
+    )
 
     indptr, indices, data, rhs, aP = _rust_build_u(
         ux.detach().numpy().astype(np.float64),
         uy.detach().numpy().astype(np.float64),
         p.detach().numpy().astype(np.float64),
         brinkman.detach().numpy().astype(np.float64),
-        float(nu), float(dx), float(dy), float(alpha_u),
-        nx, ny, inlet_val, lid_val, case,
+        float(nu),
+        float(dx),
+        float(dy),
+        float(alpha_u),
+        nx,
+        ny,
+        inlet_val,
+        lid_val,
+        case,
         nu_field.detach().numpy().astype(np.float64) if nu_field is not None else None,
         u_body.detach().numpy().astype(np.float64) if u_body is not None else None,
     )
@@ -767,16 +858,25 @@ def _solve_u(
     sol = spla.spsolve(A, rhs).reshape(ny_int, nx - 1)
 
     ux_star = ux.clone()
-    ux_star[1:ny-1, 1:nx] = torch.tensor(sol, dtype=torch.float32, device=ux.device)
+    ux_star[1 : ny - 1, 1:nx] = torch.tensor(sol, dtype=torch.float32, device=ux.device)
     a_P_t = torch.tensor(aP.reshape(ny, nx - 1), dtype=torch.float32, device=ux.device)
     return ux_star, a_P_t
 
 
 def _solve_v(
-    ux: Tensor, uy: Tensor, p: Tensor,
-    nu: float, dx: float, dy: float, alpha_u: float,
-    brinkman: Tensor, nx: int, ny: int,
-    inlet_velocity, lid_velocity, case: str,
+    ux: Tensor,
+    uy: Tensor,
+    p: Tensor,
+    nu: float,
+    dx: float,
+    dy: float,
+    alpha_u: float,
+    brinkman: Tensor,
+    nx: int,
+    ny: int,
+    inlet_velocity,
+    lid_velocity,
+    case: Literal["channel", "cavity"],
     buoyancy_src: Tensor | None = None,
     nu_field: Tensor | None = None,
     u_body: Tensor | None = None,
@@ -787,9 +887,15 @@ def _solve_v(
         uy.detach().numpy().astype(np.float64),
         p.detach().numpy().astype(np.float64),
         brinkman.detach().numpy().astype(np.float64),
-        float(nu), float(dx), float(dy), float(alpha_u),
-        nx, ny,
-        buoyancy_src.detach().numpy().astype(np.float64) if buoyancy_src is not None else None,
+        float(nu),
+        float(dx),
+        float(dy),
+        float(alpha_u),
+        nx,
+        ny,
+        buoyancy_src.detach().numpy().astype(np.float64)
+        if buoyancy_src is not None
+        else None,
         nu_field.detach().numpy().astype(np.float64) if nu_field is not None else None,
         u_body.detach().numpy().astype(np.float64) if u_body is not None else None,
     )
@@ -811,7 +917,10 @@ def _build_pressure_system(
     indptr, indices, data, pin_idx = _rust_build_p(
         a_ux.detach().numpy().astype(np.float64),
         a_uy.detach().numpy().astype(np.float64),
-        float(dx), float(dy), nx, ny,
+        float(dx),
+        float(dy),
+        nx,
+        ny,
     )
     n = nx * ny
     L = sp.csr_matrix((data, indices, indptr), shape=(n, n))
@@ -831,18 +940,22 @@ def _divergence(ux: Tensor, uy: Tensor, dx: float, dy: float) -> Tensor:
     return (ux[:, 1:] - ux[:, :-1]) / dx + (uy[1:, :] - uy[:-1, :]) / dy
 
 
-def _vcorr_x(p_prime: Tensor, a_ux: Tensor, dx: float, dy: float, nx: int, ny: int) -> Tensor:
+def _vcorr_x(
+    p_prime: Tensor, a_ux: Tensor, dx: float, dy: float, nx: int, ny: int
+) -> Tensor:
     """u-velocity correction: Δu = (dy/dx) * (dp'/dx) / a_P at interior x-faces."""
     out = torch.zeros(ny, nx + 1, device=p_prime.device, dtype=p_prime.dtype)
-    dp = (p_prime[:, 1:nx] - p_prime[:, 0:nx-1]) / dx   # (ny, nx-1)
+    dp = (p_prime[:, 1:nx] - p_prime[:, 0 : nx - 1]) / dx  # (ny, nx-1)
     out[:, 1:nx] = dp * dy / a_ux.clamp(min=1e-10)
     return out
 
 
-def _vcorr_y(p_prime: Tensor, a_uy: Tensor, dx: float, dy: float, nx: int, ny: int) -> Tensor:
+def _vcorr_y(
+    p_prime: Tensor, a_uy: Tensor, dx: float, dy: float, nx: int, ny: int
+) -> Tensor:
     """v-velocity correction: Δv = (dx/dy) * (dp'/dy) / a_P at interior y-faces."""
     out = torch.zeros(ny + 1, nx, device=p_prime.device, dtype=p_prime.dtype)
     # Only correct interior y-faces (rows 1..ny-1)
-    dp = (p_prime[1:ny, :] - p_prime[0:ny-1, :]) / dy   # (ny-1, nx)
+    dp = (p_prime[1:ny, :] - p_prime[0 : ny - 1, :]) / dy  # (ny-1, nx)
     out[1:ny, :] = dp * dx / a_uy.clamp(min=1e-10)
     return out

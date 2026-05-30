@@ -64,7 +64,9 @@ def optimize_airfoil(
     bspline = BSplineAirfoil(
         n_control_points=8, chord=chord, leading_edge_x=le_x, center_y=cy
     )
-    control_points = bspline.initial_control_points().clone().detach().requires_grad_(True)
+    control_points = (
+        bspline.initial_control_points().clone().detach().requires_grad_(True)
+    )
 
     optimizer = torch.optim.Adam([control_points], lr=lr)
 

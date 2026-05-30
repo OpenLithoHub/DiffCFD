@@ -186,7 +186,13 @@ def optimize_topology(
 
         # Convergence monitoring (B.1)
         if convergence_monitor is not None:
-            from diff_surrogate.convergence import ConvergenceAction
+            try:
+                from diff_surrogate.convergence import ConvergenceAction
+            except ImportError as e:
+                raise ImportError(
+                    "convergence_monitor requires the 'diff-surrogate' package. "
+                    "Install with: pip install diff-surrogate"
+                ) from e
 
             action = convergence_monitor.update(dp.abs().item(), step)
             if action == ConvergenceAction.EARLY_STOP:
@@ -440,7 +446,13 @@ def multi_corner_optimize(
 
         # Convergence monitoring
         if convergence_monitor is not None:
-            from diff_surrogate.convergence import ConvergenceAction
+            try:
+                from diff_surrogate.convergence import ConvergenceAction
+            except ImportError as e:
+                raise ImportError(
+                    "convergence_monitor requires the 'diff-surrogate' package. "
+                    "Install with: pip install diff-surrogate"
+                ) from e
 
             action = convergence_monitor.update(combined_loss.item(), step)
             if action == ConvergenceAction.EARLY_STOP:
