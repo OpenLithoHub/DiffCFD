@@ -303,10 +303,49 @@ def _single_seed_run(seed: int, verbose: bool = True) -> dict[str, Any]:
 
     torch.manual_seed(seed)
 
-    joint = _run_joint(h0=ic["h0"], c0=ic["c0"], init_omega_rpm=ic["init_omega_rpm"])
-    decoupled = _run_decoupled(
-        h0=ic["h0"], c0=ic["c0"], init_omega_rpm=ic["init_omega_rpm"]
-    )
+    try:
+        joint = _run_joint(h0=ic["h0"], c0=ic["c0"], init_omega_rpm=ic["init_omega_rpm"])
+    except Exception as exc:
+        if verbose:
+            print(f"  WARNING: joint optimization failed for seed {seed}: {exc}")
+        joint = None
+
+    try:
+        decoupled = _run_decoupled(
+            h0=ic["h0"], c0=ic["c0"], init_omega_rpm=ic["init_omega_rpm"]
+        )
+    except Exception as exc:
+        if verbose:
+            print(f"  WARNING: decoupled optimization failed for seed {seed}: {exc}")
+        decoupled = None
+
+    if joint is None or decoupled is None:
+        return {
+            "seed": seed,
+            "initial_conditions": {
+                "h0_um": ic["h0"] * 1e6,
+                "c0": ic["c0"],
+                "init_omega_rpm": ic["init_omega_rpm"],
+            },
+            "joint": {
+                "final_developed_nm": float("nan"),
+                "opt_dose_mj": float("nan"),
+                "final_loss": float("nan"),
+                "wall_time_s": float("nan"),
+                "process_window_width_mj": float("nan"),
+                "process_window_low_mj": float("nan"),
+                "process_window_high_mj": float("nan"),
+            },
+            "decoupled": {
+                "final_developed_nm": float("nan"),
+                "opt_dose_mj": float("nan"),
+                "final_loss": float("nan"),
+                "wall_time_s": float("nan"),
+                "process_window_width_mj": float("nan"),
+                "process_window_low_mj": float("nan"),
+                "process_window_high_mj": float("nan"),
+            },
+        }
 
     pw_joint = _process_window(
         joint["omega_profile"], joint["dose_tensor"], "Joint",
@@ -358,12 +397,12 @@ def _single_seed_run(seed: int, verbose: bool = True) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _mean(values: list[float]) -> float:
-    valid = [v for v in values if v == v]  # filter NaN
+    valid = [v for v in values if math.isfinite(v)]
     return sum(valid) / len(valid) if valid else float("nan")
 
 
 def _std(values: list[float]) -> float:
-    valid = [v for v in values if v == v]
+    valid = [v for v in values if math.isfinite(v)]
     if len(valid) < 2:
         return 0.0
     m = _mean(valid)

@@ -8,6 +8,7 @@ Couples:
 from __future__ import annotations
 
 import math
+import warnings
 
 import torch
 import torch.optim as optim
@@ -103,6 +104,15 @@ def optimize_joint_process(
         )
 
         loss = ((h_final - target_m) ** 2) / (target_m**2)
+
+        if not torch.isfinite(loss):
+            warnings.warn(
+                f"Epoch {epoch}: non-finite loss ({loss.item()}), skipping backward/step.",
+                stacklevel=2,
+            )
+            loss_history.append(float("nan"))
+            continue
+
         loss.backward()
         optimizer.step()
 
@@ -180,6 +190,14 @@ def optimize_decoupled_process(
         h_dry = h_hist[-1]
 
         spin_loss = ((h_dry - target_dry_m) ** 2) / (target_dry_m**2)
+
+        if not torch.isfinite(spin_loss):
+            warnings.warn(
+                f"Spin epoch {epoch}: non-finite loss, skipping backward/step.",
+                stacklevel=2,
+            )
+            continue
+
         spin_loss.backward()
         opt_spin.step()
 
@@ -205,6 +223,15 @@ def optimize_decoupled_process(
             spin_dt, h0, c0,
         )
         dose_loss = ((h_final - target_m) ** 2) / (target_m**2)
+
+        if not torch.isfinite(dose_loss):
+            warnings.warn(
+                f"Dose epoch {epoch}: non-finite loss, skipping backward/step.",
+                stacklevel=2,
+            )
+            loss_history.append(float("nan"))
+            continue
+
         dose_loss.backward()
         opt_dose.step()
 
@@ -285,6 +312,14 @@ def process_window_analysis(
         with torch.no_grad():
             h_dev = litho_solver(h_dry, c_dry, d.unsqueeze(0), dev_time=dev_time)
         dev_nm = h_dev.item() * 1e9
+        if not math.isfinite(dev_nm):
+            results.append({
+                "dose_mj": d.item(),
+                "developed_nm": float("nan"),
+                "error_nm": float("nan"),
+                "acceptable": False,
+            })
+            continue
         err_nm = abs(dev_nm - target_developed_nm)
         acceptable = err_nm <= tolerance_nm
         results.append({
