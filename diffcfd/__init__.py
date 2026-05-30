@@ -1,6 +1,6 @@
 """DiffCFD — Differentiable Computational Fluid Dynamics."""
 
-__version__ = "0.7.0"
+__version__ = "0.75.0"
 
 from diffcfd.geometry.mesh import CartesianMesh
 from diffcfd.geometry.shapes import cylinder_sdf, rectangle_sdf, naca0012_sdf
@@ -21,7 +21,11 @@ from diffcfd.workflows.pche import optimize_pche
 from diffcfd.solvers.spin_coating import MeyerhoferSolver, RadialThinFilmSolver
 from diffcfd.workflows.spin_coat_opt import optimize_spin_profile
 from diffcfd.solvers.litho import LithoSolver
-from diffcfd.workflows.joint_litho_opt import optimize_joint_process
+from diffcfd.workflows.joint_litho_opt import (
+    optimize_joint_process,
+    optimize_decoupled_process,
+    process_window_analysis,
+)
 from diffcfd.surrogates.fno import FNO2D, train_fno
 
 __all__ = [
@@ -52,6 +56,8 @@ __all__ = [
     "optimize_spin_profile",
     "LithoSolver",
     "optimize_joint_process",
+    "optimize_decoupled_process",
+    "process_window_analysis",
     "FNO2D",
     "train_fno",
 ]

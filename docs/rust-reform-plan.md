@@ -63,7 +63,7 @@
 
 ### 测试结果
 
-- Unit tests: 70/70 passed
+- Unit tests: 102/102 passed
 - Poiseuille validation: 2/2 passed
 - Lid-driven cavity (Re=100, Re=1000): 2/2 passed
 - Gradient checks (gradcheck): 2/2 passed

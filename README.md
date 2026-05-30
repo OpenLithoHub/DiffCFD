@@ -102,6 +102,16 @@ window = process_window_analysis(result["omega_profile"], result["dose_tensor"],
 
 Joint optimization produces a wider process window and lower final loss than sequential spin-then-dose optimization.
 
+### Flagship Demo
+
+Run the end-to-end joint vs decoupled comparison with process window analysis:
+
+```bash
+python scripts/flagship_flow_litho.py
+```
+
+This script runs both `optimize_joint_process` and `optimize_decoupled_process`, performs process window analysis around each optimum, prints a summary table, and writes `flagship_flow_litho_results.json`.
+
 ---
 
 ## Validation (Verified)
@@ -253,7 +263,8 @@ diffcfd/
 │   ├── navier_stokes_2d.py    # 2D incompressible NS + SIMPLE (Rust-accelerated forward)
 │   ├── heat_transfer.py       # Conjugate heat transfer
 │   ├── turbulence.py          # Frozen eddy viscosity (Re > 5000)
-│   ├── implicit_diff.py       # Matrix-free GMRES backward
+│   ├── implicit_diff.py       # Matrix-free GMRES backward (auto diagonal preconditioner)
+│   ├── boundary.py            # Boundary condition enforcement
 │   ├── spin_coating.py        # Differentiable spin coating (Meyerhofer + radial PDE)
 │   └── litho.py               # Differentiable lithography solver (Dill exposure + Mack develop)
 ├── envs/
@@ -279,14 +290,16 @@ diffcfd/
 │   └── simple_surrogate.py    # CNN surrogate for SIMPLE acceleration
 ├── export/
 │   └── vtk.py                 # VTK export for ParaView
-├── utils/
-│   └── linalg.py              # Matrix-free GMRES
-└── src/ (Rust via PyO3/maturin)
-    ├── momentum.rs             # Sparse momentum system assembly
-    ├── pressure.rs             # Pressure correction system assembly
-    ├── sdf.rs                  # B-spline SDF (rayon parallel)
-    ├── simple.rs               # Full SIMPLE forward loop
-    └── utils.rs                # Shared helpers (hybrid scheme, COO→CSR)
+└── utils/
+    ├── linalg.py              # Matrix-free GMRES
+    └── threading.py           # Thread affinity helpers (Rust/PyTorch coordination)
+src/ (Rust via PyO3/maturin, at repo root)
+├── lib.rs                     # PyO3 module registration
+├── momentum.rs                # Sparse momentum system assembly (CSR)
+├── pressure.rs                # Pressure correction system assembly (CSR)
+├── sdf.rs                     # B-spline SDF (rayon parallel)
+├── simple.rs                  # Full SIMPLE forward loop (faer sparse LU)
+└── utils.rs                   # Shared helpers (hybrid scheme, COO→CSR)
 ```
 
 ---
