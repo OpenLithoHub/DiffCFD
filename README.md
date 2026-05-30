@@ -82,6 +82,28 @@ pip install pytest pyamg matplotlib meshio pyevtk
 
 ---
 
+## Co-Design: Flow + Lithography
+
+DiffCFD couples spin-coating and lithography solvers through a shared process parameterization:
+
+```python
+from diffcfd.workflows import optimize_joint_process, optimize_decoupled_process
+
+# Joint co-optimization: spin profile omega(t) + exposure dose simultaneously
+result = optimize_joint_process(target_developed_h_nm=60.0, n_epochs=50)
+
+# Decoupled baseline for comparison
+baseline = optimize_decoupled_process(target_developed_h_nm=60.0)
+
+# Process window analysis around the optimum
+from diffcfd.workflows import process_window_analysis
+window = process_window_analysis(result["omega_profile"], result["dose_tensor"], spin_dt=0.001)
+```
+
+Joint optimization produces a wider process window and lower final loss than sequential spin-then-dose optimization.
+
+---
+
 ## Validation (Verified)
 
 | Case | Re | Target | Result | Status |

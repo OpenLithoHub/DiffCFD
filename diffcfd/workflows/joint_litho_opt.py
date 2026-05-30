@@ -65,7 +65,7 @@ def optimize_joint_process(
     c0: float = 0.85,
     init_omega_rpm: float = 2500.0,
 ) -> dict:
-    """Jointly optimize spin-coating speed profile AND litho exposure dose.
+    """Jointly optimize spin-coating speed profile AND litho exposure dose.  :stable:
 
     Uses separate learning rates for the spin profile and dose via Adam
     parameter groups.  If *lr_dose* is None, both groups share *lr*.
@@ -141,7 +141,7 @@ def optimize_decoupled_process(
     c0: float = 0.85,
     init_omega_rpm: float = 2500.0,
 ) -> dict:
-    """Decoupled baseline: optimize spin profile for thickness, then sweep dose.
+    """Decoupled baseline: optimize spin profile for thickness, then sweep dose.  :stable:
 
     Phase 1: Optimize omega(t) to reach a target dry thickness that is
     heuristically estimated to leave the correct amount of resist after
@@ -246,7 +246,7 @@ def process_window_analysis(
     dev_time: float = 30.0,
     tolerance_nm: float = 10.0,
 ) -> dict:
-    """Sweep dose around the nominal value and evaluate developed thickness.
+    """Sweep dose around the nominal value and evaluate developed thickness.  :stable:
 
     Args:
         omega_profile: Spin speed profile tensor (rad/s).
