@@ -149,3 +149,81 @@ def test_differentiable_solve_gradient_flows():
     Nu.backward()
     assert ux.grad is not None
     assert ux.grad.norm().item() > 1e-6, "Gradient of Nu w.r.t. ux should be non-zero"
+
+
+def test_variable_props_sco2_convergence():
+    """sCO₂ variable-property solve converges with spatially varying alpha."""
+    from diffcfd.geometry.mesh import CartesianMesh
+    from diffcfd.props.sco2 import SCO2Surrogate
+    from diffcfd.solvers.heat_transfer import HeatTransfer2D
+
+    sco2 = SCO2Surrogate(hidden_dim=32)
+    mesh = CartesianMesh(nx=16, ny=16, lx=1.0, ly=1.0)
+    ht = HeatTransfer2D(mesh, alpha=1e-6, props=sco2)
+
+    ux = torch.zeros(16, 17)
+    uy = torch.zeros(17, 16)
+    T_bc = {
+        "bottom": ("dirichlet", 300.0),
+        "top": ("dirichlet", 310.0),
+        "left": ("neumann", 0.0),
+        "right": ("neumann", 0.0),
+    }
+    pressure = torch.full((16, 16), 7.377e6)
+
+    T = ht.solve_differentiable(ux, uy, T_bc=T_bc, max_iter=300, pressure=pressure)
+    assert torch.isfinite(T).all(), "NaN in variable-property solve"
+    assert T.min() >= 299.0 and T.max() <= 311.0
+
+
+def test_variable_props_gradient_flows():
+    """Gradient flows through variable-property solve (sCO₂ surrogate)."""
+    from diffcfd.geometry.mesh import CartesianMesh
+    from diffcfd.props.sco2 import SCO2Surrogate
+    from diffcfd.solvers.heat_transfer import HeatTransfer2D
+
+    sco2 = SCO2Surrogate(hidden_dim=32)
+    mesh = CartesianMesh(nx=8, ny=8, lx=1.0, ly=1.0)
+    ht = HeatTransfer2D(mesh, alpha=1e-6, props=sco2)
+
+    ux = torch.ones(8, 9) * 0.01
+    ux.requires_grad_(True)
+    uy = torch.zeros(9, 8)
+    T_bc = {
+        "bottom": ("dirichlet", 300.0),
+        "top": ("dirichlet", 310.0),
+        "left": ("neumann", 0.0),
+        "right": ("neumann", 0.0),
+    }
+    pressure = torch.full((8, 8), 7.377e6)
+    T = ht.solve_differentiable(ux, uy, T_bc=T_bc, max_iter=100, pressure=pressure)
+    loss = T.sum()
+    loss.backward()
+    assert ux.grad is not None
+    assert torch.isfinite(ux.grad).all(), "NaN gradient through variable-property solve"
+
+
+def test_cht_boundary_coupling():
+    """CHT: coupled NS + variable-property heat transfer produces bounded fields."""
+    pytest.importorskip("diffcfd.solvers.navier_stokes_2d")
+    from diffcfd.geometry.mesh import CartesianMesh
+    from diffcfd.props.sco2 import SCO2Surrogate
+    from diffcfd.solvers.heat_transfer import HeatTransfer2D, coupled_steady_solve
+    from diffcfd.solvers.navier_stokes_2d import NavierStokes2D
+
+    ns = NavierStokes2D(reynolds_number=10.0, grid=(16, 8), lx=4.0, ly=1.0, tol=1e-5)
+    mesh = ns.mesh
+    sco2 = SCO2Surrogate(hidden_dim=32)
+    ht = HeatTransfer2D(mesh, alpha=1e-6, props=sco2)
+
+    T_bc = {
+        "bottom": ("dirichlet", 300.0),
+        "top": ("dirichlet", 310.0),
+        "left": ("neumann", 0.0),
+        "right": ("neumann", 0.0),
+    }
+    ux, uy, p, T = coupled_steady_solve(
+        ns, ht, T_bc=T_bc, inlet_velocity=0.5, case="channel"
+    )
+    assert torch.isfinite(T).all()
+    assert T.min() >= 299.0 and T.max() <= 311.0

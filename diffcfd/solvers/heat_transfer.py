@@ -3,7 +3,9 @@
 Steady-state convection-diffusion for temperature on the same MAC grid:
     ∇·(u T) = ∇·(α ∇T) + S_T
 
-where α = k/(ρ cp) is the thermal diffusivity.
+where α = k/(ρ cp) is the thermal diffusivity. When a ``ThermophysicalProps``
+instance is provided, α is recomputed from local (T, p) at each iteration,
+enabling spatially varying properties for transcritical/sCO₂ flows.
 
 Coupling strategy: sequential (solve NS to steady state, then solve energy;
 optionally iterate between the two for buoyancy-driven flows).
@@ -48,9 +50,13 @@ class HeatTransfer2D:
         k: float = 1.0,
         rho: float = 1.0,
         cp: float = 1.0,
+        props: object | None = None,
     ) -> None:
         self.mesh = mesh
-        if alpha is not None:
+        self.props = props
+        if props is not None:
+            self.alpha = k / (rho * cp)
+        elif alpha is not None:
             self.alpha = alpha
         else:
             self.alpha = k / (rho * cp)
@@ -237,6 +243,7 @@ class HeatTransfer2D:
         T_bc: dict | None = None,
         tol: float = 1e-6,
         max_iter: int = 200,
+        pressure: Tensor | None = None,
     ) -> Tensor:
         """Solve energy equation with PyTorch-native iterative sweep (differentiable).
 
@@ -244,12 +251,18 @@ class HeatTransfer2D:
         hybrid upwind scheme with full autograd tracking. The iteration is
         unrolled so gradients flow through all sweeps.
 
+        When ``self.props`` is set, thermal diffusivity is recomputed from
+        local (T, p) at each iteration using the property surrogate, enabling
+        spatially varying properties for transcritical/sCO₂ flows.
+
         Args:
             ux: x-velocity on x-faces, shape (ny, nx+1).
             uy: y-velocity on y-faces, shape (ny+1, nx).
             T_bc: Dict with thermal BCs (same format as solve()).
             tol: Convergence tolerance.
             max_iter: Maximum sweeps.
+            pressure: Pressure field (ny, nx) in Pa. Required when
+                ``self.props`` is set for variable-property mode.
 
         Returns:
             T: Temperature field (ny, nx), differentiable w.r.t. ux, uy.
@@ -278,29 +291,34 @@ class HeatTransfer2D:
                 T[j, :] = bc_bottom[1] + (bc_top[1] - bc_bottom[1]) * y_frac[j + 1]
 
         # Pre-compute face velocities on staggered MAC grid:
-        # ux is on x-faces: shape (ny, nx+1). East face of cell (j,i) = ux[j, i+1], west = ux[j, i].
-        # uy is on y-faces: shape (ny+1, nx). North face of cell (j,i) = uy[j+1, i], south = uy[j, i].
-        u_east = ux[:, 1:]  # (ny, nx) velocity at east face of each cell
-        u_west = ux[:, :-1]  # (ny, nx) velocity at west face of each cell
-        v_north = uy[1:, :]  # (ny, nx) velocity at north face of each cell
-        v_south = uy[:-1, :]  # (ny, nx) velocity at south face of each cell
+        u_east = ux[:, 1:]  # (ny, nx)
+        u_west = ux[:, :-1]
+        v_north = uy[1:, :]
+        v_south = uy[:-1, :]
 
-        # Boundary condition masks (constant across iterations)
         bc_bottom = T_bc.get("bottom", ("neumann", 0.0))
         bc_top = T_bc.get("top", ("neumann", 1.0))
         bc_left = T_bc.get("left", ("neumann", 0.0))
         bc_right = T_bc.get("right", ("neumann", 0.0))
 
+        variable_props = self.props is not None
+
         for _it in range(max_iter):
             T_old = T.clone()
+
+            # Variable-property mode: recompute alpha from local (T, p)
+            if variable_props:
+                p_field = pressure if pressure is not None else torch.full_like(T, 7.377e6)
+                k_loc = self.props.conductivity(T, p_field)
+                rho_loc = self.props.density(T, p_field)
+                cp_loc = self.props.specific_heat(T, p_field)
+                alpha_field = k_loc / (rho_loc * cp_loc + 1e-30)
+            else:
+                alpha_field = alpha_th
 
             # Padded T with boundary ghost cells for BC handling
             T_pad = torch.zeros(ny + 2, nx + 2, device=dev, dtype=ux.dtype)
             T_pad[1:-1, 1:-1] = T
-
-            # Ghost cells: Dirichlet → mirror the wall value through the cell center
-            # so that (T_ghost + T_first_cell)/2 = T_wall, i.e. T_ghost = 2*T_wall - T_cell
-            # Neumann (zero gradient) → T_ghost = T_cell
 
             if bc_bottom[0] == "dirichlet":
                 T_pad[0, 1:-1] = 2 * bc_bottom[1] - T[0, :]
@@ -327,26 +345,26 @@ class HeatTransfer2D:
             T_n = T_pad[2:, 1:-1]
             T_s = T_pad[:-2, 1:-1]
 
-            # Face mass fluxes (dimensional) — each face uses its own staggered velocity
             F_e = u_east * dy
             F_w = u_west * dy
             F_n = v_north * dx
             F_s = v_south * dx
 
-            # Diffusion coefficients: interior faces use full spacing;
-            # faces at Dirichlet walls use half spacing (wall to cell center).
-            # Use broadcastable scalars for uniform grid; multiply by directional
-            # wall-correction masks where needed.
-            D_base_x = alpha_th * dy / dx
-            D_base_y = alpha_th * dx / dy
-            # Uniform diffusion coefficients — the ghost cell Dirichlet formula
-            # (T_ghost = 2*T_wall - T_cell) already accounts for the half-distance.
-            D_e = torch.full((ny, nx), D_base_x, device=dev, dtype=ux.dtype)
-            D_w = torch.full((ny, nx), D_base_x, device=dev, dtype=ux.dtype)
-            D_n = torch.full((ny, nx), D_base_y, device=dev, dtype=ux.dtype)
-            D_s = torch.full((ny, nx), D_base_y, device=dev, dtype=ux.dtype)
+            if variable_props:
+                D_base_x = alpha_field * dy / dx
+                D_base_y = alpha_field * dx / dy
+                D_e = D_base_x
+                D_w = D_base_x
+                D_n = D_base_y
+                D_s = D_base_y
+            else:
+                D_base_x = alpha_th * dy / dx
+                D_base_y = alpha_th * dx / dy
+                D_e = torch.full((ny, nx), D_base_x, device=dev, dtype=ux.dtype)
+                D_w = torch.full((ny, nx), D_base_x, device=dev, dtype=ux.dtype)
+                D_n = torch.full((ny, nx), D_base_y, device=dev, dtype=ux.dtype)
+                D_s = torch.full((ny, nx), D_base_y, device=dev, dtype=ux.dtype)
 
-            # Hybrid upwind scheme
             a_e = torch.clamp(D_e - 0.5 * F_e.abs(), min=0.0) + torch.clamp(
                 -F_e, min=0.0
             )
@@ -362,10 +380,8 @@ class HeatTransfer2D:
 
             a_P = a_e + a_w + a_n + a_s + 1e-30
 
-            # Jacobi update: T_new = (a_e*T_e + a_w*T_w + a_n*T_n + a_s*T_s) / a_P
             T = (a_e * T_e + a_w * T_w + a_n * T_n + a_s * T_s) / a_P
 
-            # Convergence check
             with torch.no_grad():
                 res = (T - T_old).abs().max().item()
                 if res < tol:
