@@ -5,6 +5,7 @@ explicitly — only matvec products via torch.func.vjp are needed.
 Memory: O(N · restart) where restart is the GMRES restart parameter (~30–50).
 
 Acceptance gate (v0.1): converge within 200 iterations at Re=1000.
+v0.7: optional right preconditioner for stiff (Brinkman ε ≤ 1e-5) systems.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ def gmres_matfree(
     tol: float = 1e-6,
     max_iter: int = 200,
     restart: int = 30,
+    precond: Callable[[Tensor], Tensor] | None = None,
 ) -> tuple[Tensor, int]:
     """Solve A·x = b with matrix-free restarted GMRES (GMRES-m / Arnoldi).
 
@@ -38,6 +40,11 @@ def gmres_matfree(
         tol: Relative residual tolerance ‖r‖/‖b‖ < tol.
         max_iter: Maximum total iterations across all restarts.
         restart: Krylov subspace size per restart cycle.
+        precond: Optional right preconditioner M⁻¹ such that AM⁻¹ is better
+            conditioned.  When provided, the Arnoldi process applies
+            ``w = matvec(precond(v_j))`` and the solution is recovered as
+            ``x = M⁻¹ y``.  Defaults to ``None`` (no preconditioning),
+            preserving backward compatibility.
 
     Returns:
         x: Solution tensor, shape (N,).
@@ -76,7 +83,10 @@ def gmres_matfree(
 
         j_used = 0
         for j in range(m):
-            w = matvec(Q[j])
+            # Right-preconditioned Arnoldi: w = A M⁻¹ v_j
+            v_j = Q[j]
+            z_j = precond(v_j) if precond is not None else v_j
+            w = matvec(z_j)
             for i in range(j + 1):
                 H[i, j] = torch.dot(w, Q[i])
                 w = w - H[i, j] * Q[i]
@@ -121,7 +131,11 @@ def gmres_matfree(
             1
         )
         Q_mat = torch.stack(Q[:j_used], dim=1)
-        x = x + Q_mat @ y
+        # Right-preconditioned update: x = x + M⁻¹ (Q y)
+        delta = Q_mat @ y
+        if precond is not None:
+            delta = precond(delta)
+        x = x + delta
 
         if converged:
             break

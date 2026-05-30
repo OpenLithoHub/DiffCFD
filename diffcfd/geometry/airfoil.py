@@ -185,6 +185,10 @@ class BSplineAirfoil:
     def sdf(self, mesh: CartesianMesh, control_points: Tensor) -> Tensor:
         """Compute SDF from B-spline control points (differentiable).
 
+        Uses the shared ``diff_surrogate.geometry.sdf_from_curve`` operator
+        when available; falls back to the built-in segment-distance + ray-cast
+        implementation.
+
         Args:
             mesh: CartesianMesh instance.
             control_points: (2*n_cp, 2) tensor of [x, y] coordinates.
@@ -192,6 +196,17 @@ class BSplineAirfoil:
         Returns:
             SDF tensor (ny, nx).
         """
+        try:
+            from diff_surrogate.geometry import sdf_from_curve
+
+            x, y = mesh.cell_centers()
+            # sdf_from_curve expects control_points directly (not B-spline eval)
+            # For BSplineAirfoil, control_points define a polygon, so pass directly
+            return sdf_from_curve(x, y, control_points, softmin_temp=10.0, winding_sharpness=20.0)
+        except ImportError:
+            pass
+
+        # Fallback: segment-distance + ray-cast winding number
         x, y = mesh.cell_centers()
         nx, ny = mesh.nx, mesh.ny
         n_pts = control_points.shape[0]
